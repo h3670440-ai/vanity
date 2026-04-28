@@ -543,26 +543,28 @@ do
 
         if SA_C['Enabled'] then
             if SA_C['Mode'] == 'Automatic' then
-            -- always track whoever is closest in FOV
-            local tgt = getClosestTarget()
-            if tgt then
-                local _, part = getAimPosition(tgt)
-                currentTarget = part
-            else
-                currentTarget = nil
+                -- always track whoever is closest in FOV
+                local tgt = getClosestTarget()
+                if tgt then
+                    local _, part = getAimPosition(tgt)
+                    currentTarget = part
+                else
+                    currentTarget = nil
+                end
+            else -- 'Target' mode: track the locked player
+                if not saLocked or not lockedPlayer then
+                    currentTarget = nil
+                else
+                    local char = lockedPlayer.Character
+                    local hum  = char and char:FindFirstChildOfClass('Humanoid')
+                    if not char or not hum or hum.Health <= 0 then
+                        saLocked = false; lockedPlayer = nil; currentTarget = nil
+                    else
+                        local _, part = getAimPosition(lockedPlayer)
+                        currentTarget = part
+                    end
+                end
             end
-
-        else -- 'Target' mode: track the locked player
-            if not saLocked or not lockedPlayer then
-                currentTarget = nil; return
-            end
-            local char = lockedPlayer.Character
-            local hum  = char and char:FindFirstChildOfClass('Humanoid')
-            if not char or not hum or hum.Health <= 0 then
-                saLocked = false; lockedPlayer = nil; currentTarget = nil; return
-            end
-            local _, part = getAimPosition(lockedPlayer)
-            currentTarget = part
         end
 
         --  CAMERA LOCK AIM
@@ -687,7 +689,6 @@ do
         if SA_C['Mode'] == 'Automatic' then
             SA_C['Enabled'] = not SA_C['Enabled']
             if not SA_C['Enabled'] then currentTarget = nil end
-
         else
             if saLocked then
                 saLocked = false; lockedPlayer = nil; currentTarget = nil
@@ -723,13 +724,6 @@ do
             end
         end
     end)
-
-    -- store for cleanup
-    shared._VanityOldIndex    = oldIndex
-    shared._VanityOldNewIndex = oldNewIndex
-    shared._VanityGRM         = grm
-    shared._VanitySA_Circle   = SilentCircle
-    shared._VanityCL_Circle   = CLFovCircle
 end
 
 --  RAPID FIRE
@@ -866,10 +860,11 @@ shared.VanityCleanup = function()
     print('[Vanity] Cleaned up.')
 end
 
-print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | ESP [%s] | RF [%s] | Shutdown [%s]',
+print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | ESP [%s] | RF [%s] | Camlock [%s] | Shutdown [%s]',
     Binds['Silent Aim'] or 'Y',
     Binds['Speed']      or 'X',
     Binds['ESP']        or 'H',
     Binds['Rapid Fire'] or 'L',
+    Binds['Camera Lock'] or 'K',
     Binds['Shutdown']   or 'P'
 ))
