@@ -94,7 +94,7 @@ do
         { ID = 17809101348,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- New Hood
         { ID = 99991590066512,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- New Hood 2
         { ID = 77852114927492,  Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- May Hood
-        { ID = 102372656720272, Arg = "UpdateMousePosI",       Remote = "MainEvent",      BodyEffects = "K.O" }, -- Dee Hood
+        { ID = 103896094006875, Arg = "UpdateMousePosI",       Remote = "MainEvent",      BodyEffects = "K.O" }, -- Dee Hood
         { ID = 138293393214382, Arg = "DERHOODMOUSEPOS666^",   Remote = "MainRemoteEvent",BodyEffects = "K.O" }, -- Der Hood
         { ID = 98930372136494,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- AR Hood
         { ID = 76565633209271,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- OG Da Hood (alt)
