@@ -30,6 +30,7 @@ local ESP_C = CFG['ESP']
 local RF_C  = CFG['Rapid Fire']
 local IR_C  = CFG['Infinite Range']
 local SM_C  = CFG['Spread Modifier']
+local CL_C  = CFG['Camera Lock']
 
 --  STATE
 local speedEnabled     = false
@@ -39,6 +40,8 @@ local isMouseDown      = false
 local currentTarget    = nil   -- BasePart we are locked onto (for ESP highlight)
 local saLocked         = false  -- whether we have a target locked
 local lockedPlayer     = nil   -- the Player object that is locked
+local camLocked         = false
+local camTarget         = nil
 
 --  HELPERS
 local function getHumanoid()
@@ -57,6 +60,75 @@ local function isHoldingKnife()
     if not tool then return false end
     local name = tool.Name:lower()
     return name:find("knife") or name:find("blade") or name:find("fist") or name:find("combat")
+end
+
+local function clIsKnocked(char)
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local s = hum:GetState()
+        if s == Enum.HumanoidStateType.Dead or s == Enum.HumanoidStateType.Physics
+        or s == Enum.HumanoidStateType.Ragdoll then return true end
+    end
+    -- Da Hood specific check
+    local be = char:FindFirstChild("BodyEffects")
+    if be then
+        local k = be:FindFirstChild("K.O")
+        if k and k.Value then return true end
+    end
+    return false
+end
+
+local function getBodyParts(character)
+    return {
+        character:FindFirstChild("Head"),
+        character:FindFirstChild("UpperTorso"),
+        character:FindFirstChild("HumanoidRootPart"),
+        character:FindFirstChild("LowerTorso"),
+        character:FindFirstChild("LeftUpperArm"),  character:FindFirstChild("RightUpperArm"),
+        character:FindFirstChild("LeftLowerArm"),  character:FindFirstChild("RightLowerArm"),
+        character:FindFirstChild("LeftHand"),      character:FindFirstChild("RightHand"),
+        character:FindFirstChild("LeftUpperLeg"),  character:FindFirstChild("RightUpperLeg"),
+        character:FindFirstChild("LeftLowerLeg"),  character:FindFirstChild("RightLowerLeg"),
+        character:FindFirstChild("LeftFoot"),      character:FindFirstChild("RightFoot"),
+    }
+end
+
+local function getClosestBodyPart(character)
+    local best, bd = nil, math.huge
+    local mp = UserInputService:GetMouseLocation()
+    for _, part in pairs(getBodyParts(character)) do
+        if part and part:IsA("BasePart") then
+            local sp, on = Camera:WorldToViewportPoint(part.Position)
+            if on then
+                local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                if d < bd then bd = d; best = part end
+            end
+        end
+    end
+    return best
+end
+
+local function clFindClosest()
+    local mp       = UserInputService:GetMouseLocation()
+    local fovCfg   = CL_C['FOV'] or {}
+    local fovLimit = (fovCfg['Enabled'] and fovCfg['Size']) or math.huge
+    local best, bd = nil, math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local char = player.Character
+        if not char or clIsKnocked(char) then continue end
+        local hum = char:FindFirstChildOfClass('Humanoid')
+        if not hum or hum.Health <= 0 then continue end
+        local hrp = char:FindFirstChild('HumanoidRootPart')
+        if not hrp then continue end
+        local sp, on = Camera:WorldToViewportPoint(hrp.Position)
+        if on and sp.Z > 0 then
+            local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+            if d <= fovLimit and d < bd then bd = d; best = hrp end
+        end
+    end
+    return best
 end
 
 local FontMap = {
@@ -312,23 +384,47 @@ do
     TracerLine.Color        = Color3.fromRGB(255, 60, 60)
     TracerLine.Visible      = false
 
+    -- Camlock FOV circle
+    local CLFovCircle = Drawing.new("Circle")
+    CLFovCircle.Filled       = false
+    CLFovCircle.Thickness    = 1
+    CLFovCircle.NumSides     = 64
+    CLFovCircle.Transparency = 1
+    CLFovCircle.Visible      = false
+
     RunService.RenderStepped:Connect(function()
-        if isShutdown or not SA_C['Enabled'] then 
+        if isShutdown then 
             SilentCircle.Visible = false
+            CLFovCircle.Visible = false
             TracerLine.Visible = false
             TracerOutline.Visible = false
             return 
         end
         
-        -- FOV Circle
-        local fov = SA_C['Fov']
-        if fov['Enabled'] and fov['Show Fov'] then
+        -- FOV Circles
+        local saFov = SA_C['Fov']
+        if SA_C['Enabled'] and saFov['Enabled'] and saFov['Show Fov'] then
             local mp = UserInputService:GetMouseLocation()
             SilentCircle.Position = mp
-            SilentCircle.Radius   = (fov['Value'] or 13) * 12
+            SilentCircle.Radius   = (saFov['Value'] or 13) * 12
             SilentCircle.Visible  = true
         else
             SilentCircle.Visible = false
+        end
+
+        if CL_C['Enabled'] then
+            local clFov = CL_C['FOV'] or {}
+            if clFov['Enabled'] and clFov['Visible'] then
+                local mp = UserInputService:GetMouseLocation()
+                CLFovCircle.Position = mp
+                CLFovCircle.Radius   = clFov['Size'] or 120
+                CLFovCircle.Color    = clFov['Color'] or Color3.fromRGB(255, 255, 255)
+                CLFovCircle.Visible  = true
+            else
+                CLFovCircle.Visible = false
+            end
+        else
+            CLFovCircle.Visible = false
         end
 
         -- Tracer
@@ -437,13 +533,16 @@ do
         return best.Position + vel * predVal, best
     end
 
-    -- RenderStepped: update currentTarget for ESP based on mode
+    -- RenderStepped: update targets
     RunService.RenderStepped:Connect(function()
-        if isShutdown or not SA_C['Enabled'] then
-            currentTarget = nil; return
+        if isShutdown then
+            currentTarget = nil
+            camTarget = nil
+            return
         end
 
-        if SA_C['Mode'] == 'Automatic' then
+        if SA_C['Enabled'] then
+            if SA_C['Mode'] == 'Automatic' then
             -- always track whoever is closest in FOV
             local tgt = getClosestTarget()
             if tgt then
@@ -464,6 +563,42 @@ do
             end
             local _, part = getAimPosition(lockedPlayer)
             currentTarget = part
+        end
+
+        --  CAMERA LOCK AIM
+        if CL_C['Enabled'] then
+            if CL_C['Target Mode'] == 'Automatic' then
+                if isHoldingKnife() then
+                    camLocked = false; camTarget = nil
+                else
+                    local best = clFindClosest()
+                    if best then camLocked = true; camTarget = best
+                    else camLocked = false; camTarget = nil end
+                end
+            end
+
+            if camLocked and camTarget and not isHoldingKnife() then
+                local char = camTarget.Parent
+                if not char or clIsKnocked(char) then
+                    camLocked = false; camTarget = nil
+                else
+                    local hitPart = CL_C['Hit Part'] or 'HumanoidRootPart'
+                    local aimPart = (hitPart == 'Closest Part') and getClosestBodyPart(char)
+                                  or char:FindFirstChild(hitPart) or camTarget
+                    
+                    if aimPart then
+                        local pred    = CL_C['Prediction'] or {}
+                        local vel     = camTarget.AssemblyLinearVelocity or Vector3.new(0,0,0)
+                        local scale   = math.clamp((aimPart.Position - Camera.CFrame.Position).Magnitude / 100, 0.05, 1)
+                        local px, py, pz = pred['X'] or 0, pred['Y'] or 0, pred['Z'] or 0
+                        local aimPos  = aimPart.Position + Vector3.new(vel.X*px*scale, vel.Y*py*scale, vel.Z*pz*scale)
+                        
+                        local targetCF = CFrame.new(Camera.CFrame.Position, aimPos)
+                        local smooth   = math.clamp(tonumber(CL_C['Smoothness']) or 0, 0, 0.99)
+                        Camera.CFrame  = (smooth <= 0) and targetCF or Camera.CFrame:Lerp(targetCF, 1 - smooth)
+                    end
+                end
+            end
         end
     end)
 
@@ -539,6 +674,7 @@ do
     shared._VanityOldNamecall = oldNamecall
     shared._VanityGRM         = grm
     shared._VanitySA_Circle   = SilentCircle
+    shared._VanityCL_Circle   = CLFovCircle
 
     setreadonly(grm, true)
 
@@ -565,11 +701,35 @@ do
         end
     end)
 
+    -- Camlock keybind
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp or isShutdown then return end
+        local bind = Binds['Camera Lock']
+        if not bind or input.KeyCode ~= Enum.KeyCode[bind:upper()] then return end
+
+        if CL_C['Target Mode'] == 'Automatic' then
+            CL_C['Enabled'] = not CL_C['Enabled']
+            if not CL_C['Enabled'] then camLocked = false; camTarget = nil end
+            print('[Vanity] Camlock ' .. (CL_C['Enabled'] and 'ON' or 'OFF'))
+        else
+            if camLocked then
+                camLocked = false; camTarget = nil
+            else
+                local tgt = clFindClosest()
+                if tgt then
+                    camLocked = true
+                    camTarget = tgt
+                end
+            end
+        end
+    end)
+
     -- store for cleanup
     shared._VanityOldIndex    = oldIndex
     shared._VanityOldNewIndex = oldNewIndex
     shared._VanityGRM         = grm
     shared._VanitySA_Circle   = SilentCircle
+    shared._VanityCL_Circle   = CLFovCircle
 end
 
 --  RAPID FIRE
@@ -631,6 +791,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
         currentTarget     = nil
         saLocked          = false
         lockedPlayer      = nil
+        camLocked         = false
+        camTarget         = nil
         resetSpeed()
         pcall(function()
             setreadonly(shared._VanityGRM, false)
@@ -640,6 +802,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             setreadonly(shared._VanityGRM, true)
         end)
         pcall(function() shared._VanitySA_Circle:Remove() end)
+        pcall(function() shared._VanityCL_Circle:Remove() end)
         pcall(function() TracerLine:Remove() end)
         pcall(function() TracerOutline:Remove() end)
         pcall(function() espGui:Destroy() end)
@@ -685,6 +848,8 @@ shared.VanityCleanup = function()
     currentTarget     = nil
     saLocked          = false
     lockedPlayer      = nil
+    camLocked         = false
+    camTarget         = nil
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanityGRM, false)
@@ -694,6 +859,7 @@ shared.VanityCleanup = function()
         setreadonly(shared._VanityGRM, true)
     end)
     pcall(function() shared._VanitySA_Circle:Remove() end)
+    pcall(function() shared._VanityCL_Circle:Remove() end)
     pcall(function() TracerLine:Remove() end)
     pcall(function() TracerOutline:Remove() end)
     pcall(function() espGui:Destroy() end)
