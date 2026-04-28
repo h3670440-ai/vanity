@@ -10,9 +10,7 @@ if shared.VanityCleanup then
     shared.VanityCleanup = nil
 end
 
--- ============================================================================
 --  SERVICES
--- ============================================================================
 local Players           = game:GetService("Players")
 local UserInputService  = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
@@ -24,24 +22,20 @@ repeat task.wait() until LocalPlayer.Character
 local Camera = workspace.CurrentCamera
 local Mouse  = LocalPlayer:GetMouse()
 
--- ============================================================================
 --  CONFIG REFS
--- ============================================================================
 local Binds = CFG['General']['Binds']
 local SPD_C = CFG['Speed']
 local SA_C  = CFG['Silent Aim']
 local ESP_C = CFG['ESP']
 
--- ============================================================================
 --  STATE
--- ============================================================================
 local speedEnabled  = false
 local isShutdown    = false
-local currentTarget = nil  -- the BasePart we are locked onto (set by SA loop)
+local currentTarget = nil   -- BasePart we are locked onto (for ESP highlight)
+local saLocked      = false  -- whether we have a target locked
+local lockedPlayer  = nil   -- the Player object that is locked
 
--- ============================================================================
 --  HELPERS
--- ============================================================================
 local function getHumanoid()
     local char = LocalPlayer.Character
     return char and char:FindFirstChildOfClass('Humanoid')
@@ -60,9 +54,7 @@ local FontMap = {
     RobotoMono     = Enum.Font.RobotoMono,
 }
 
--- ============================================================================
 --  WALKSPEED
--- ============================================================================
 RunService.RenderStepped:Connect(function()
     if isShutdown then return end
     if SPD_C['Enabled'] and speedEnabled then
@@ -78,9 +70,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
--- ============================================================================
 --  ESP
--- ============================================================================
 local espGui = Instance.new("ScreenGui")
 espGui.Name          = "VanityESP"
 espGui.ResetOnSpawn  = false
@@ -184,9 +174,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ============================================================================
 --  SILENT AIM
--- ============================================================================
 do
     -- Game database (Da Hood variants) — used to also fire the server remote
     local Games = {
@@ -308,17 +296,33 @@ do
         return best.Position + vel * predVal, best
     end
 
-    -- RenderStepped: update currentTarget for ESP colour
+    -- RenderStepped: update currentTarget for ESP based on mode
     RunService.RenderStepped:Connect(function()
         if isShutdown or not SA_C['Enabled'] then
             currentTarget = nil; return
         end
-        local tgt = getClosestTarget()
-        if tgt then
-            local pos, part = getAimPosition(tgt)
+
+        if SA_C['Mode'] == 'Automatic' then
+            -- always track whoever is closest in FOV
+            local tgt = getClosestTarget()
+            if tgt then
+                local _, part = getAimPosition(tgt)
+                currentTarget = part
+            else
+                currentTarget = nil
+            end
+
+        else -- 'Target' mode: track the locked player
+            if not saLocked or not lockedPlayer then
+                currentTarget = nil; return
+            end
+            local char = lockedPlayer.Character
+            local hum  = char and char:FindFirstChildOfClass('Humanoid')
+            if not char or not hum or hum.Health <= 0 then
+                saLocked = false; lockedPlayer = nil; currentTarget = nil; return
+            end
+            local _, part = getAimPosition(lockedPlayer)
             currentTarget = part
-        else
-            currentTarget = nil
         end
     end)
 
@@ -327,22 +331,25 @@ do
     local oldIndex = grm.__index
     setreadonly(grm, false)
 
+    -- Mouse.Hit hook: Automatic uses closest each frame, Target uses locked player
     grm.__index = newcclosure(function(self, key)
         if not isShutdown and not checkcaller() and self == Mouse and SA_C['Enabled'] then
             if key == 'Hit' or key == 'Target' then
-                local tgt = getClosestTarget()
+                local tgt = nil
+                if SA_C['Mode'] == 'Automatic' then
+                    tgt = getClosestTarget()
+                elseif saLocked and lockedPlayer then
+                    tgt = lockedPlayer
+                end
                 if tgt then
                     local pos, part = getAimPosition(tgt)
                     if pos then
-                        -- Fire the game remote if supported (Da Hood etc.)
                         if MainEvent and gameSettings then
                             pcall(function()
                                 MainEvent:FireServer(gameSettings.Arg, pos)
                             end)
                         end
-                        if key == 'Target' then
-                            return part or oldIndex(self, key)
-                        end
+                        if key == 'Target' then return part or oldIndex(self, key) end
                         return CFrame.new(pos)
                     end
                 end
@@ -353,14 +360,26 @@ do
 
     setreadonly(grm, true)
 
-    -- SA keybind toggle
+    -- SA keybind — behaviour depends on mode
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp or isShutdown then return end
         local bind = Binds['Silent Aim']
-        if bind and input.KeyCode == Enum.KeyCode[bind:upper()] then
+        if not bind or input.KeyCode ~= Enum.KeyCode[bind:upper()] then return end
+
+        if SA_C['Mode'] == 'Automatic' then
             SA_C['Enabled'] = not SA_C['Enabled']
             if not SA_C['Enabled'] then currentTarget = nil end
-            print('[Vanity] Silent Aim ' .. (SA_C['Enabled'] and 'ON' or 'OFF'))
+
+        else
+            if saLocked then
+                saLocked = false; lockedPlayer = nil; currentTarget = nil
+            else
+                local tgt = getClosestTarget()
+                if tgt then
+                    saLocked     = true
+                    lockedPlayer = tgt
+                end
+            end
         end
     end)
 
@@ -370,18 +389,18 @@ do
     shared._VanitySA_Circle   = SilentCircle
 end
 
--- ============================================================================
 --  KEYBINDS
--- ============================================================================
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed or isShutdown then return end
     local kc = input.KeyCode
 
     -- Shutdown
     if Binds['Shutdown'] and kc == Enum.KeyCode[Binds['Shutdown']:upper()] then
-        isShutdown   = true
-        speedEnabled = false
+        isShutdown    = true
+        speedEnabled  = false
         currentTarget = nil
+        saLocked      = false
+        lockedPlayer  = nil
         resetSpeed()
         pcall(function()
             setreadonly(shared._VanitySA_GRM, false)
@@ -418,13 +437,13 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
--- ============================================================================
 --  CLEANUP FUNCTION
--- ============================================================================
 shared.VanityCleanup = function()
     isShutdown    = true
     speedEnabled  = false
     currentTarget = nil
+    saLocked      = false
+    lockedPlayer  = nil
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanitySA_GRM, false)
