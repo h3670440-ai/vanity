@@ -321,12 +321,20 @@ do
             if not hrp then continue end
 
             local sp, on    = Camera:WorldToViewportPoint(hrp.Position)
-            local mouseDist = (on and sp.Z > 0) and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or math.huge
+            local isOnScreen = (on and sp.Z > 0)
+            local mouseDist = isOnScreen and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or 50000
             local realDist  = (hrp.Position - Camera.CFrame.Position).Magnitude
-            local inFov     = (not fovEnabled) or (mouseDist <= fovRad)
+            
+            local isEligible = (not fovEnabled) or (mouseDist <= fovRad)
 
-            if inFov then
-                local metric = (selMode == 'Mouse') and mouseDist or realDist
+            if isEligible then
+                local metric
+                if selMode == 'Mouse' then
+                    metric = mouseDist
+                else
+                    metric = realDist
+                end
+
                 if metric < best then
                     best, tgt = metric, plr
                 end
@@ -338,18 +346,18 @@ do
     -- Get the best body part to aim at on the target
     local function getAimPosition(plr)
         if not plr or not plr.Character then return nil, nil end
-        local char  = plr.Character
-        local parts = SA_C['Hit Location']['Parts']
-        local mp    = UserInputService:GetMouseLocation()
+        local char    = plr.Character
+        local parts   = SA_C['Hit Location']['Parts']
+        local mp      = UserInputService:GetMouseLocation()
         local selMode = SA_C['Selection Mode'] or 'Mouse'
-        local fovEnabled = SA_C['Fov']['Enabled']
         local best, bd = nil, math.huge
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
             if part and part:IsA('BasePart') then
                 local sp, on    = Camera:WorldToViewportPoint(part.Position)
-                local mouseDist = (on and sp.Z > 0) and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or math.huge
+                local isOnScreen = (on and sp.Z > 0)
+                local mouseDist = isOnScreen and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or 50000
                 local realDist  = (part.Position - Camera.CFrame.Position).Magnitude
                 
                 local metric = (selMode == 'Mouse') and mouseDist or realDist
