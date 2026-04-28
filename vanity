@@ -30,12 +30,14 @@ local Mouse  = LocalPlayer:GetMouse()
 local Binds = CFG['General']['Binds']
 local SPD_C = CFG['Speed']
 local SA_C  = CFG['Silent Aim']
+local ESP_C = CFG['ESP']
 
 -- ============================================================================
 --  STATE
 -- ============================================================================
-local speedEnabled = false
-local isShutdown   = false
+local speedEnabled  = false
+local isShutdown    = false
+local currentTarget = nil  -- the BasePart we are locked onto (set by SA loop)
 
 -- ============================================================================
 --  HELPERS
@@ -49,6 +51,14 @@ local function resetSpeed()
     local hum = getHumanoid()
     if hum then hum.WalkSpeed = 16 end
 end
+
+local FontMap = {
+    GothamBold     = Enum.Font.GothamBold,
+    Gotham         = Enum.Font.Gotham,
+    SourceSansBold = Enum.Font.SourceSansBold,
+    Code           = Enum.Font.Code,
+    RobotoMono     = Enum.Font.RobotoMono,
+}
 
 -- ============================================================================
 --  WALKSPEED
@@ -69,101 +79,159 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 end)
 
 -- ============================================================================
+--  ESP
+-- ============================================================================
+local espGui = Instance.new("ScreenGui")
+espGui.Name          = "VanityESP"
+espGui.ResetOnSpawn  = false
+espGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+espGui.IgnoreGuiInset = true
+pcall(function() espGui.Parent = game:GetService("CoreGui") end)
+if not espGui.Parent then espGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local espLabels = {}  -- [userId] = TextLabel
+
+local function makeTag()
+    local lbl = Instance.new("TextLabel", espGui)
+    lbl.BackgroundTransparency = 1
+    lbl.AnchorPoint            = Vector2.new(0.5, 1)
+    lbl.Size                   = UDim2.new(0, 200, 0, 18)
+    lbl.Font                   = FontMap[ESP_C['Font']] or Enum.Font.GothamBold
+    lbl.TextSize               = ESP_C['Size'] or 13
+    lbl.TextColor3             = ESP_C['Color'] or Color3.fromRGB(220, 220, 220)
+    lbl.TextStrokeTransparency = ESP_C['Stroke'] and 0.5 or 1
+    lbl.TextStrokeColor3       = Color3.fromRGB(0, 0, 0)
+    lbl.Text                   = ""
+    lbl.Visible                = false
+    lbl.ZIndex                 = 10
+    return lbl
+end
+
+local function addESP(player)
+    if player == LocalPlayer then return end
+    local key = tostring(player.UserId)
+    if espLabels[key] then pcall(function() espLabels[key]:Destroy() end) end
+    espLabels[key] = makeTag()
+end
+
+local function removeESP(player)
+    local key = tostring(player.UserId)
+    if espLabels[key] then
+        pcall(function() espLabels[key]:Destroy() end)
+        espLabels[key] = nil
+    end
+end
+
+-- init existing players
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        addESP(p)
+        p.CharacterAdded:Connect(function()
+            removeESP(p); task.wait(0.1)
+            if p.Parent then addESP(p) end
+        end)
+        p.CharacterRemoving:Connect(function() removeESP(p) end)
+    end
+end
+Players.PlayerAdded:Connect(function(p)
+    task.wait(0.1); addESP(p)
+    p.CharacterAdded:Connect(function()
+        removeESP(p); task.wait(0.1)
+        if p.Parent then addESP(p) end
+    end)
+    p.CharacterRemoving:Connect(function() removeESP(p) end)
+end)
+Players.PlayerRemoving:Connect(removeESP)
+
+-- ESP update loop
+RunService.RenderStepped:Connect(function()
+    if isShutdown then return end
+    for userId, lbl in pairs(espLabels) do
+        if not ESP_C['Enabled'] then lbl.Visible = false; continue end
+
+        -- find the player
+        local player = nil
+        for _, p in ipairs(Players:GetPlayers()) do
+            if tostring(p.UserId) == userId then player = p; break end
+        end
+        if not player or not player.Parent then
+            pcall(function() lbl:Destroy() end)
+            espLabels[userId] = nil
+            continue
+        end
+
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum or hum.Health <= 0 then
+            lbl.Visible = false; continue
+        end
+
+        -- project slightly below feet
+        local sp, on = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 2.5, 0))
+        if not on or sp.Z <= 0 then lbl.Visible = false; continue end
+
+        -- check if this player is the current SA target
+        local isTarget = currentTarget ~= nil
+            and currentTarget.Parent == char
+
+        lbl.Text       = player.Name
+        lbl.TextColor3 = isTarget
+            and (ESP_C['Target Color'] or Color3.fromRGB(255, 60, 60))
+            or  (ESP_C['Color']        or Color3.fromRGB(220, 220, 220))
+        lbl.Position   = UDim2.new(0, sp.X, 0, sp.Y + 2)
+        lbl.Visible    = true
+    end
+end)
+
+-- ============================================================================
 --  SILENT AIM
 -- ============================================================================
 do
-    -- Game database (Da Hood and variants)
+    -- Game database (Da Hood variants) — used to also fire the server remote
     local Games = {
-        { ID = 2788229376,      Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Hood
-        { ID = 16033173781,     Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Hood Macro
-        { ID = 7213786345,      Arg = "UpdateMousePosI",       Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Hood VC
-        { ID = 9825515356,      Arg = "MousePosUpdate",        Remote = "MainEvent"                          }, -- Hood Customs
-        { ID = 5602055394,      Arg = "MousePos",              Remote = "Bullets"                            }, -- Hood Modded
-        { ID = 77369032494150,  Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Downhill (PS/Xbox)
-        { ID = 132023669786646, Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Bank
-        { ID = 84366677940861,  Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Uphill
-        { ID = 14487637618,     Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Hood Bot Aim Trainer
-        { ID = 11143225577,     Arg = "UpdateMousePos",        Remote = "MainEvent"                          }, -- 1v1 Hood Aim Trainer
-        { ID = 14413712255,     Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Hood Aim
-        { ID = 14472848239,     Arg = "MoonUpdateMousePos",    Remote = "MainEvent"                          }, -- Moon Hood
-        { ID = 15186202290,     Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Strike
-        { ID = 17319408836,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- OG Da Hood
-        { ID = 12804651854,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Dah Aim Trainer
-        { ID = 17780567699,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Meko Hood
-        { ID = 128258288926907, Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Craft
-        { ID = 17809101348,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- New Hood
-        { ID = 99991590066512,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- New Hood 2
-        { ID = 77852114927492,  Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- May Hood
-        { ID = 103896094006875, Arg = "UpdateMousePosI",       Remote = "MainEvent",      BodyEffects = "K.O" }, -- Dee Hood
-        { ID = 138293393214382, Arg = "DERHOODMOUSEPOS666^",   Remote = "MainRemoteEvent",BodyEffects = "K.O" }, -- Der Hood
-        { ID = 98930372136494,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- AR Hood
-        { ID = 76565633209271,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- OG Da Hood (alt)
-        { ID = 88582222971530,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Del Hood Aim
-        { ID = 113357850268933, Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Kitty
+        { ID = 2788229376,      Arg = "UpdateMousePosI2",    Remote = "MainEvent"      }, -- Da Hood
+        { ID = 16033173781,     Arg = "UpdateMousePosI2",    Remote = "MainEvent"      }, -- Da Hood Macro
+        { ID = 7213786345,      Arg = "UpdateMousePosI",     Remote = "MainEvent"      }, -- Da Hood VC
+        { ID = 9825515356,      Arg = "MousePosUpdate",      Remote = "MainEvent"      }, -- Hood Customs
+        { ID = 5602055394,      Arg = "MousePos",            Remote = "Bullets"        }, -- Hood Modded
+        { ID = 77369032494150,  Arg = "MOUSE",               Remote = "MAINEVENT"      }, -- Da Downhill (PS/Xbox)
+        { ID = 132023669786646, Arg = "MOUSE",               Remote = "MAINEVENT"      }, -- Da Bank
+        { ID = 84366677940861,  Arg = "MOUSE",               Remote = "MAINEVENT"      }, -- Da Uphill
+        { ID = 14487637618,     Arg = "MOUSE",               Remote = "MAINEVENT"      }, -- Da Hood Bot Aim Trainer
+        { ID = 11143225577,     Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- 1v1 Hood Aim Trainer
+        { ID = 14413712255,     Arg = "MOUSE",               Remote = "MAINEVENT"      }, -- Hood Aim
+        { ID = 14472848239,     Arg = "MoonUpdateMousePos",  Remote = "MainEvent"      }, -- Moon Hood
+        { ID = 15186202290,     Arg = "MOUSE",               Remote = "MAINEVENT"      }, -- Da Strike
+        { ID = 17319408836,     Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- OG Da Hood
+        { ID = 12804651854,     Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Dah Aim Trainer
+        { ID = 17780567699,     Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Meko Hood
+        { ID = 128258288926907, Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Da Craft
+        { ID = 17809101348,     Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- New Hood
+        { ID = 99991590066512,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- New Hood 2
+        { ID = 77852114927492,  Arg = "UpdateMousePosI2",    Remote = "MainEvent"      }, -- May Hood
+        { ID = 102372656720272, Arg = "UpdateMousePosI",     Remote = "MainEvent"      }, -- Dee Hood
+        { ID = 138293393214382, Arg = "DERHOODMOUSEPOS666^", Remote = "MainRemoteEvent" }, -- Der Hood
+        { ID = 98930372136494,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- AR Hood
+        { ID = 76565633209271,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- OG Da Hood (alt)
+        { ID = 88582222971530,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Del Hood Aim
+        { ID = 113357850268933, Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Da Kitty
     }
 
-    -- Detect current game
     local gameSettings = nil
     for _, g in ipairs(Games) do
-        if g.ID == game.PlaceId then
-            gameSettings = g
-            break
-        end
+        if g.ID == game.PlaceId then gameSettings = g; break end
     end
 
-    -- Try to find the remote for this game
     local MainEvent = nil
     if gameSettings then
         MainEvent = ReplicatedStorage:FindFirstChild(gameSettings.Remote)
         if MainEvent then
-            print("[Vanity] Game detected — remote: " .. gameSettings.Remote)
+            print("[Vanity] Game matched: " .. gameSettings.Remote)
         end
     end
 
-    -- -------------------------------------------------------
-    --  CHECK HELPERS
-    -- -------------------------------------------------------
-    local function hasCheck(name)
-        for _, v in ipairs(SA_C['Checks'] or {}) do
-            if tostring(v):lower() == name:lower() then return true end
-        end
-        return false
-    end
-
-    local function isKnocked(plr)
-        if not hasCheck('Knocked') then return false end
-        local char = plr.Character; if not char then return true end
-        local be = char:FindFirstChild('BodyEffects')
-        if be then
-            local ko = be:FindFirstChild('K.O')
-            if ko and ko.Value then return true end
-            local kn = be:FindFirstChild('Knocked')
-            if kn and kn.Value then return true end
-        end
-        return false
-    end
-
-    local function isGrabbed(plr)
-        if not hasCheck('Grabbed') then return false end
-        local char = plr.Character; if not char then return false end
-        return char:FindFirstChild('GRABBING_CONSTRAINT') ~= nil
-    end
-
-    local function wallCheck(targetPos)
-        if not hasCheck('Wall') then return true end
-        local origin = Camera.CFrame.Position
-        local dir    = targetPos - origin
-        local params = RaycastParams.new()
-        params.FilterDescendantsInstances = { LocalPlayer.Character }
-        params.FilterType  = Enum.RaycastFilterType.Exclude
-        params.IgnoreWater = true
-        local result = workspace:Raycast(origin, dir.Unit * dir.Magnitude, params)
-        return result == nil
-    end
-
-    -- -------------------------------------------------------
-    --  FOV CIRCLE
-    -- -------------------------------------------------------
+    -- FOV circle
     local SilentCircle = Drawing.new('Circle')
     SilentCircle.Filled      = false
     SilentCircle.Thickness   = 1
@@ -185,9 +253,7 @@ do
         end
     end)
 
-    -- -------------------------------------------------------
-    --  TARGETING
-    -- -------------------------------------------------------
+    -- Find closest player within FOV (no checks — targets everyone)
     local function getClosestTarget()
         local fov    = SA_C['Fov']
         local fovRad = fov['Enabled'] and ((fov['Value'] or 13) * 12) or math.huge
@@ -195,34 +261,31 @@ do
         local best, tgt = math.huge, nil
 
         for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LocalPlayer and plr.Character then
-                local char = plr.Character
-                local hum  = char:FindFirstChildOfClass('Humanoid')
-                local hrp  = char:FindFirstChild('HumanoidRootPart')
-                if hum and hum.Health > 0 and hrp then
-                    if not isKnocked(plr) and not isGrabbed(plr) then
-                        local sp, on = Camera:WorldToViewportPoint(hrp.Position)
-                        if on and sp.Z > 0 then
-                            local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
-                            if d <= fovRad and d < best and wallCheck(hrp.Position) then
-                                best, tgt = d, plr
-                            end
-                        end
-                    end
+            if plr == LocalPlayer then continue end
+            local char = plr.Character
+            if not char then continue end
+            local hum = char:FindFirstChildOfClass('Humanoid')
+            if not hum or hum.Health <= 0 then continue end
+            local hrp = char:FindFirstChild('HumanoidRootPart')
+            if not hrp then continue end
+
+            local sp, on = Camera:WorldToViewportPoint(hrp.Position)
+            if on and sp.Z > 0 then
+                local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                if d <= fovRad and d < best then
+                    best, tgt = d, plr
                 end
             end
         end
         return tgt
     end
 
-    -- -------------------------------------------------------
-    --  AIM POSITION + PREDICTION
-    -- -------------------------------------------------------
+    -- Get the best body part to aim at on the target
     local function getAimPosition(plr)
-        if not plr or not plr.Character then return nil end
-        local char    = plr.Character
-        local parts   = SA_C['Hit Location']['Parts']
-        local mp      = UserInputService:GetMouseLocation()
+        if not plr or not plr.Character then return nil, nil end
+        local char  = plr.Character
+        local parts = SA_C['Hit Location']['Parts']
+        local mp    = UserInputService:GetMouseLocation()
         local best, bd = nil, math.huge
 
         for _, pname in ipairs(parts) do
@@ -236,20 +299,30 @@ do
             end
         end
 
-        if not best then return nil end
+        if not best then return nil, nil end
 
-        -- Apply velocity prediction
         local predSets  = SA_C['Prediction']['Sets']
         local predLevel = SA_C['Prediction']['Level'] or 'Low'
         local predVal   = predSets[predLevel] or 0
         local vel       = best.AssemblyLinearVelocity or Vector3.new()
-
-        return best.Position + vel * predVal
+        return best.Position + vel * predVal, best
     end
 
-    -- -------------------------------------------------------
-    --  MOUSE.HIT HOOK
-    -- -------------------------------------------------------
+    -- RenderStepped: update currentTarget for ESP colour
+    RunService.RenderStepped:Connect(function()
+        if isShutdown or not SA_C['Enabled'] then
+            currentTarget = nil; return
+        end
+        local tgt = getClosestTarget()
+        if tgt then
+            local pos, part = getAimPosition(tgt)
+            currentTarget = part
+        else
+            currentTarget = nil
+        end
+    end)
+
+    -- Mouse.Hit metamethod hook
     local grm      = getrawmetatable(game)
     local oldIndex = grm.__index
     setreadonly(grm, false)
@@ -259,17 +332,16 @@ do
             if key == 'Hit' or key == 'Target' then
                 local tgt = getClosestTarget()
                 if tgt then
-                    local pos = getAimPosition(tgt)
+                    local pos, part = getAimPosition(tgt)
                     if pos then
-                        -- Fire the game's mouse-position remote (Da Hood etc.)
+                        -- Fire the game remote if supported (Da Hood etc.)
                         if MainEvent and gameSettings then
                             pcall(function()
                                 MainEvent:FireServer(gameSettings.Arg, pos)
                             end)
                         end
                         if key == 'Target' then
-                            local char = tgt.Character
-                            return char and char:FindFirstChild('HumanoidRootPart') or oldIndex(self, key)
+                            return part or oldIndex(self, key)
                         end
                         return CFrame.new(pos)
                     end
@@ -281,26 +353,25 @@ do
 
     setreadonly(grm, true)
 
-    -- -------------------------------------------------------
-    --  SA KEYBIND TOGGLE
-    -- -------------------------------------------------------
+    -- SA keybind toggle
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp or isShutdown then return end
         local bind = Binds['Silent Aim']
         if bind and input.KeyCode == Enum.KeyCode[bind:upper()] then
             SA_C['Enabled'] = not SA_C['Enabled']
+            if not SA_C['Enabled'] then currentTarget = nil end
             print('[Vanity] Silent Aim ' .. (SA_C['Enabled'] and 'ON' or 'OFF'))
         end
     end)
 
-    -- Store SA cleanup for shutdown
+    -- store for cleanup
     shared._VanitySA_OldIndex = oldIndex
     shared._VanitySA_GRM      = grm
     shared._VanitySA_Circle   = SilentCircle
 end
 
 -- ============================================================================
---  KEYBINDS (speed + shutdown)
+--  KEYBINDS
 -- ============================================================================
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed or isShutdown then return end
@@ -310,6 +381,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
     if Binds['Shutdown'] and kc == Enum.KeyCode[Binds['Shutdown']:upper()] then
         isShutdown   = true
         speedEnabled = false
+        currentTarget = nil
         resetSpeed()
         pcall(function()
             setreadonly(shared._VanitySA_GRM, false)
@@ -317,6 +389,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             setreadonly(shared._VanitySA_GRM, true)
         end)
         pcall(function() shared._VanitySA_Circle:Remove() end)
+        pcall(function() espGui:Destroy() end)
         shared.VanityCleanup = nil
         print('[Vanity] Shutdown.')
         return
@@ -334,14 +407,24 @@ UserInputService.InputBegan:Connect(function(input, processed)
             print('[Vanity] Speed OFF')
         end
     end
+
+    -- ESP toggle
+    if Binds['ESP'] and kc == Enum.KeyCode[Binds['ESP']:upper()] then
+        ESP_C['Enabled'] = not ESP_C['Enabled']
+        if not ESP_C['Enabled'] then
+            for _, lbl in pairs(espLabels) do lbl.Visible = false end
+        end
+        print('[Vanity] ESP ' .. (ESP_C['Enabled'] and 'ON' or 'OFF'))
+    end
 end)
 
 -- ============================================================================
 --  CLEANUP FUNCTION
 -- ============================================================================
 shared.VanityCleanup = function()
-    isShutdown   = true
-    speedEnabled = false
+    isShutdown    = true
+    speedEnabled  = false
+    currentTarget = nil
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanitySA_GRM, false)
@@ -349,11 +432,13 @@ shared.VanityCleanup = function()
         setreadonly(shared._VanitySA_GRM, true)
     end)
     pcall(function() shared._VanitySA_Circle:Remove() end)
+    pcall(function() espGui:Destroy() end)
     print('[Vanity] Cleaned up.')
 end
 
-print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | Shutdown [%s]',
+print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | ESP [%s] | Shutdown [%s]',
     Binds['Silent Aim'] or 'Y',
     Binds['Speed']      or 'X',
+    Binds['ESP']        or 'H',
     Binds['Shutdown']   or 'P'
 ))
