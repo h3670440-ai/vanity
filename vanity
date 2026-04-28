@@ -1,10 +1,10 @@
 -- vanitynew.lua | Vanity
--- Run vanityconfig.lua first!
+-- https://github.com/h3670440-ai/vanity
 
-assert(shared.VanityNew, "[Vanity] Config not found -- run vanityconfig.lua first.")
+assert(shared.VanityNew, "[Vanity] Config not found — run vanityconfig.lua first.")
 local CFG = shared.VanityNew
 
--- Cleanup previous execution if re-ran
+-- Cleanup any previous execution
 if shared.VanityCleanup then
     pcall(shared.VanityCleanup)
     shared.VanityCleanup = nil
@@ -13,19 +13,27 @@ end
 -- ============================================================================
 --  SERVICES
 -- ============================================================================
-local Players          = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService       = game:GetService("RunService")
+local Players           = game:GetService("Players")
+local UserInputService  = game:GetService("UserInputService")
+local RunService        = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- ============================================================================
---  LOCALS
--- ============================================================================
-local LocalPlayer  = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer.Character
 
-local Binds       = CFG['General']['Binds']
-local SPD_C       = CFG['Speed']
+local Camera = workspace.CurrentCamera
+local Mouse  = LocalPlayer:GetMouse()
 
+-- ============================================================================
+--  CONFIG REFS
+-- ============================================================================
+local Binds = CFG['General']['Binds']
+local SPD_C = CFG['Speed']
+local SA_C  = CFG['Silent Aim']
+
+-- ============================================================================
+--  STATE
+-- ============================================================================
 local speedEnabled = false
 local isShutdown   = false
 
@@ -42,13 +50,8 @@ local function resetSpeed()
     if hum then hum.WalkSpeed = 16 end
 end
 
-local function applySpeed()
-    local hum = getHumanoid()
-    if hum then hum.WalkSpeed = SPD_C['Value'] or 16 end
-end
-
 -- ============================================================================
---  WALKSPEED LOOP
+--  WALKSPEED
 -- ============================================================================
 RunService.RenderStepped:Connect(function()
     if isShutdown then return end
@@ -58,7 +61,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Reapply after respawn
 LocalPlayer.CharacterAdded:Connect(function(char)
     char:WaitForChild('Humanoid')
     if speedEnabled then
@@ -67,7 +69,238 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 end)
 
 -- ============================================================================
---  KEYBINDS
+--  SILENT AIM
+-- ============================================================================
+do
+    -- Game database (Da Hood and variants)
+    local Games = {
+        { ID = 2788229376,      Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Hood
+        { ID = 16033173781,     Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Hood Macro
+        { ID = 7213786345,      Arg = "UpdateMousePosI",       Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Hood VC
+        { ID = 9825515356,      Arg = "MousePosUpdate",        Remote = "MainEvent"                          }, -- Hood Customs
+        { ID = 5602055394,      Arg = "MousePos",              Remote = "Bullets"                            }, -- Hood Modded
+        { ID = 77369032494150,  Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Downhill (PS/Xbox)
+        { ID = 132023669786646, Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Bank
+        { ID = 84366677940861,  Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Uphill
+        { ID = 14487637618,     Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Hood Bot Aim Trainer
+        { ID = 11143225577,     Arg = "UpdateMousePos",        Remote = "MainEvent"                          }, -- 1v1 Hood Aim Trainer
+        { ID = 14413712255,     Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Hood Aim
+        { ID = 14472848239,     Arg = "MoonUpdateMousePos",    Remote = "MainEvent"                          }, -- Moon Hood
+        { ID = 15186202290,     Arg = "MOUSE",                 Remote = "MAINEVENT"                          }, -- Da Strike
+        { ID = 17319408836,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- OG Da Hood
+        { ID = 12804651854,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Dah Aim Trainer
+        { ID = 17780567699,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Meko Hood
+        { ID = 128258288926907, Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Craft
+        { ID = 17809101348,     Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- New Hood
+        { ID = 99991590066512,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- New Hood 2
+        { ID = 77852114927492,  Arg = "UpdateMousePosI2",      Remote = "MainEvent",      BodyEffects = "K.O" }, -- May Hood
+        { ID = 102372656720272, Arg = "UpdateMousePosI",       Remote = "MainEvent",      BodyEffects = "K.O" }, -- Dee Hood
+        { ID = 138293393214382, Arg = "DERHOODMOUSEPOS666^",   Remote = "MainRemoteEvent",BodyEffects = "K.O" }, -- Der Hood
+        { ID = 98930372136494,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- AR Hood
+        { ID = 76565633209271,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- OG Da Hood (alt)
+        { ID = 88582222971530,  Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Del Hood Aim
+        { ID = 113357850268933, Arg = "UpdateMousePos",        Remote = "MainEvent",      BodyEffects = "K.O" }, -- Da Kitty
+    }
+
+    -- Detect current game
+    local gameSettings = nil
+    for _, g in ipairs(Games) do
+        if g.ID == game.PlaceId then
+            gameSettings = g
+            break
+        end
+    end
+
+    -- Try to find the remote for this game
+    local MainEvent = nil
+    if gameSettings then
+        MainEvent = ReplicatedStorage:FindFirstChild(gameSettings.Remote)
+        if MainEvent then
+            print("[Vanity] Game detected — remote: " .. gameSettings.Remote)
+        end
+    end
+
+    -- -------------------------------------------------------
+    --  CHECK HELPERS
+    -- -------------------------------------------------------
+    local function hasCheck(name)
+        for _, v in ipairs(SA_C['Checks'] or {}) do
+            if tostring(v):lower() == name:lower() then return true end
+        end
+        return false
+    end
+
+    local function isKnocked(plr)
+        if not hasCheck('Knocked') then return false end
+        local char = plr.Character; if not char then return true end
+        local be = char:FindFirstChild('BodyEffects')
+        if be then
+            local ko = be:FindFirstChild('K.O')
+            if ko and ko.Value then return true end
+            local kn = be:FindFirstChild('Knocked')
+            if kn and kn.Value then return true end
+        end
+        return false
+    end
+
+    local function isGrabbed(plr)
+        if not hasCheck('Grabbed') then return false end
+        local char = plr.Character; if not char then return false end
+        return char:FindFirstChild('GRABBING_CONSTRAINT') ~= nil
+    end
+
+    local function wallCheck(targetPos)
+        if not hasCheck('Wall') then return true end
+        local origin = Camera.CFrame.Position
+        local dir    = targetPos - origin
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = { LocalPlayer.Character }
+        params.FilterType  = Enum.RaycastFilterType.Exclude
+        params.IgnoreWater = true
+        local result = workspace:Raycast(origin, dir.Unit * dir.Magnitude, params)
+        return result == nil
+    end
+
+    -- -------------------------------------------------------
+    --  FOV CIRCLE
+    -- -------------------------------------------------------
+    local SilentCircle = Drawing.new('Circle')
+    SilentCircle.Filled      = false
+    SilentCircle.Thickness   = 1
+    SilentCircle.NumSides    = 64
+    SilentCircle.Transparency = 1
+    SilentCircle.Color       = Color3.fromRGB(255, 255, 255)
+    SilentCircle.Visible     = false
+
+    RunService.RenderStepped:Connect(function()
+        if isShutdown or not SA_C['Enabled'] then SilentCircle.Visible = false; return end
+        local fov = SA_C['Fov']
+        if fov['Enabled'] and fov['Show Fov'] then
+            local mp = UserInputService:GetMouseLocation()
+            SilentCircle.Position = mp
+            SilentCircle.Radius   = (fov['Value'] or 13) * 12
+            SilentCircle.Visible  = true
+        else
+            SilentCircle.Visible = false
+        end
+    end)
+
+    -- -------------------------------------------------------
+    --  TARGETING
+    -- -------------------------------------------------------
+    local function getClosestTarget()
+        local fov    = SA_C['Fov']
+        local fovRad = fov['Enabled'] and ((fov['Value'] or 13) * 12) or math.huge
+        local mp     = UserInputService:GetMouseLocation()
+        local best, tgt = math.huge, nil
+
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local char = plr.Character
+                local hum  = char:FindFirstChildOfClass('Humanoid')
+                local hrp  = char:FindFirstChild('HumanoidRootPart')
+                if hum and hum.Health > 0 and hrp then
+                    if not isKnocked(plr) and not isGrabbed(plr) then
+                        local sp, on = Camera:WorldToViewportPoint(hrp.Position)
+                        if on and sp.Z > 0 then
+                            local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                            if d <= fovRad and d < best and wallCheck(hrp.Position) then
+                                best, tgt = d, plr
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return tgt
+    end
+
+    -- -------------------------------------------------------
+    --  AIM POSITION + PREDICTION
+    -- -------------------------------------------------------
+    local function getAimPosition(plr)
+        if not plr or not plr.Character then return nil end
+        local char    = plr.Character
+        local parts   = SA_C['Hit Location']['Parts']
+        local mp      = UserInputService:GetMouseLocation()
+        local best, bd = nil, math.huge
+
+        for _, pname in ipairs(parts) do
+            local part = char:FindFirstChild(pname)
+            if part and part:IsA('BasePart') then
+                local sp, on = Camera:WorldToViewportPoint(part.Position)
+                if on then
+                    local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                    if d < bd then bd = d; best = part end
+                end
+            end
+        end
+
+        if not best then return nil end
+
+        -- Apply velocity prediction
+        local predSets  = SA_C['Prediction']['Sets']
+        local predLevel = SA_C['Prediction']['Level'] or 'Low'
+        local predVal   = predSets[predLevel] or 0
+        local vel       = best.AssemblyLinearVelocity or Vector3.new()
+
+        return best.Position + vel * predVal
+    end
+
+    -- -------------------------------------------------------
+    --  MOUSE.HIT HOOK
+    -- -------------------------------------------------------
+    local grm      = getrawmetatable(game)
+    local oldIndex = grm.__index
+    setreadonly(grm, false)
+
+    grm.__index = newcclosure(function(self, key)
+        if not isShutdown and not checkcaller() and self == Mouse and SA_C['Enabled'] then
+            if key == 'Hit' or key == 'Target' then
+                local tgt = getClosestTarget()
+                if tgt then
+                    local pos = getAimPosition(tgt)
+                    if pos then
+                        -- Fire the game's mouse-position remote (Da Hood etc.)
+                        if MainEvent and gameSettings then
+                            pcall(function()
+                                MainEvent:FireServer(gameSettings.Arg, pos)
+                            end)
+                        end
+                        if key == 'Target' then
+                            local char = tgt.Character
+                            return char and char:FindFirstChild('HumanoidRootPart') or oldIndex(self, key)
+                        end
+                        return CFrame.new(pos)
+                    end
+                end
+            end
+        end
+        return oldIndex(self, key)
+    end)
+
+    setreadonly(grm, true)
+
+    -- -------------------------------------------------------
+    --  SA KEYBIND TOGGLE
+    -- -------------------------------------------------------
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp or isShutdown then return end
+        local bind = Binds['Silent Aim']
+        if bind and input.KeyCode == Enum.KeyCode[bind:upper()] then
+            SA_C['Enabled'] = not SA_C['Enabled']
+            print('[Vanity] Silent Aim ' .. (SA_C['Enabled'] and 'ON' or 'OFF'))
+        end
+    end)
+
+    -- Store SA cleanup for shutdown
+    shared._VanitySA_OldIndex = oldIndex
+    shared._VanitySA_GRM      = grm
+    shared._VanitySA_Circle   = SilentCircle
+end
+
+-- ============================================================================
+--  KEYBINDS (speed + shutdown)
 -- ============================================================================
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed or isShutdown then return end
@@ -75,11 +308,17 @@ UserInputService.InputBegan:Connect(function(input, processed)
 
     -- Shutdown
     if Binds['Shutdown'] and kc == Enum.KeyCode[Binds['Shutdown']:upper()] then
-        isShutdown = true
+        isShutdown   = true
         speedEnabled = false
         resetSpeed()
+        pcall(function()
+            setreadonly(shared._VanitySA_GRM, false)
+            shared._VanitySA_GRM.__index = shared._VanitySA_OldIndex
+            setreadonly(shared._VanitySA_GRM, true)
+        end)
+        pcall(function() shared._VanitySA_Circle:Remove() end)
         shared.VanityCleanup = nil
-        print("[Vanity] Shutdown.")
+        print('[Vanity] Shutdown.')
         return
     end
 
@@ -87,11 +326,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
     if SPD_C['Enabled'] and Binds['Speed'] and kc == Enum.KeyCode[Binds['Speed']:upper()] then
         speedEnabled = not speedEnabled
         if speedEnabled then
-            applySpeed()
-            print("[Vanity] Speed ON -> " .. (SPD_C['Value'] or 16))
+            local hum = getHumanoid()
+            if hum then hum.WalkSpeed = SPD_C['Value'] or 16 end
+            print('[Vanity] Speed ON → ' .. (SPD_C['Value'] or 16))
         else
             resetSpeed()
-            print("[Vanity] Speed OFF")
+            print('[Vanity] Speed OFF')
         end
     end
 end)
@@ -100,10 +340,20 @@ end)
 --  CLEANUP FUNCTION
 -- ============================================================================
 shared.VanityCleanup = function()
-    isShutdown  = true
+    isShutdown   = true
     speedEnabled = false
     resetSpeed()
-    print("[Vanity] Cleaned up.")
+    pcall(function()
+        setreadonly(shared._VanitySA_GRM, false)
+        shared._VanitySA_GRM.__index = shared._VanitySA_OldIndex
+        setreadonly(shared._VanitySA_GRM, true)
+    end)
+    pcall(function() shared._VanitySA_Circle:Remove() end)
+    print('[Vanity] Cleaned up.')
 end
 
-print("[Vanity] Ready. Press [" .. (Binds['Speed'] or 'X') .. "] to toggle speed.")
+print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | Shutdown [%s]',
+    Binds['Silent Aim'] or 'Y',
+    Binds['Speed']      or 'X',
+    Binds['Shutdown']   or 'P'
+))
