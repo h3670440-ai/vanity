@@ -74,13 +74,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function(char)
-    char:WaitForChild('Humanoid')
-    if speedEnabled then
-        char.Humanoid.WalkSpeed = SPD_C['Value'] or 16
-    end
-end)
-
 --  ESP
 local espGui = Instance.new("ScreenGui")
 espGui.Name          = "VanityESP"
@@ -125,23 +118,9 @@ end
 
 -- init existing players
 for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then
-        addESP(p)
-        p.CharacterAdded:Connect(function()
-            removeESP(p); task.wait(0.1)
-            if p.Parent then addESP(p) end
-        end)
-        p.CharacterRemoving:Connect(function() removeESP(p) end)
-    end
+    if p ~= LocalPlayer then addESP(p) end
 end
-Players.PlayerAdded:Connect(function(p)
-    task.wait(0.1); addESP(p)
-    p.CharacterAdded:Connect(function()
-        removeESP(p); task.wait(0.1)
-        if p.Parent then addESP(p) end
-    end)
-    p.CharacterRemoving:Connect(function() removeESP(p) end)
-end)
+Players.PlayerAdded:Connect(addESP)
 Players.PlayerRemoving:Connect(removeESP)
 
 -- ESP update loop
@@ -416,8 +395,10 @@ do
 
     -- No Jump Cooldown hook
     grm.__newindex = newcclosure(function(t, k, v)
-        if not isShutdown and k == "JumpPower" and CFG['No Jump Cooldown']['Enabled'] then
-            return oldNewIndex(t, k, 50)
+        if not isShutdown and not checkcaller() and k == "JumpPower" and CFG['No Jump Cooldown']['Enabled'] then
+            if t:IsA("Humanoid") then
+                return oldNewIndex(t, k, 50)
+            end
         end
         return oldNewIndex(t, k, v)
     end)
