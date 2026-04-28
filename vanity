@@ -29,6 +29,7 @@ local SA_C  = CFG['Silent Aim']
 local ESP_C = CFG['ESP']
 local RF_C  = CFG['Rapid Fire']
 local IR_C  = CFG['Infinite Range']
+local SM_C  = CFG['Spread Modifier']
 
 --  STATE
 local speedEnabled     = false
@@ -96,6 +97,40 @@ RunService.RenderStepped:Connect(function()
         end
     end
 end)
+
+--  SPREAD MODIFIER
+do
+    if SM_C and SM_C['Enabled'] and hookfunction then
+        local oldRandom
+        oldRandom = hookfunction(math.random, function(...)
+            local args = {...}
+            if isShutdown or checkcaller() then return oldRandom(...) end
+            
+            -- Detect if this is likely a spread calculation
+            local isSpread = (#args == 0)
+                or (args[1] and args[2] and args[1] < 0 and args[2] > 0 and math.abs(args[1]) <= 0.2)
+                
+            if isSpread then
+                if not SM_C['Enabled'] then return oldRandom(...) end
+                
+                if SM_C['Specific Weapons']['Enabled'] then
+                    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Tool')
+                    if not tool then return oldRandom(...) end
+                    local found = false
+                    for _, w in ipairs(SM_C['Specific Weapons']['Weapons']) do
+                        if tool.Name:lower():find(w:gsub('%[',''):gsub('%]',''):lower(), 1, true) then
+                            found = true; break
+                        end
+                    end
+                    if not found then return oldRandom(...) end
+                end
+                
+                return oldRandom(...) * (SM_C['Amount'] or 0)
+            end
+            return oldRandom(...)
+        end)
+    end
+end
 
 --  ESP
 local espGui = Instance.new("ScreenGui")
