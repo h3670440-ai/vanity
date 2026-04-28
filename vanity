@@ -1,0 +1,109 @@
+-- vanitynew.lua | Vanity
+-- Run vanityconfig.lua first!
+
+assert(shared.VanityNew, "[Vanity] Config not found -- run vanityconfig.lua first.")
+local CFG = shared.VanityNew
+
+-- Cleanup previous execution if re-ran
+if shared.VanityCleanup then
+    pcall(shared.VanityCleanup)
+    shared.VanityCleanup = nil
+end
+
+-- ============================================================================
+--  SERVICES
+-- ============================================================================
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+
+-- ============================================================================
+--  LOCALS
+-- ============================================================================
+local LocalPlayer  = Players.LocalPlayer
+repeat task.wait() until LocalPlayer.Character
+
+local Binds       = CFG['General']['Binds']
+local SPD_C       = CFG['Speed']
+
+local speedEnabled = false
+local isShutdown   = false
+
+-- ============================================================================
+--  HELPERS
+-- ============================================================================
+local function getHumanoid()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChildOfClass('Humanoid')
+end
+
+local function resetSpeed()
+    local hum = getHumanoid()
+    if hum then hum.WalkSpeed = 16 end
+end
+
+local function applySpeed()
+    local hum = getHumanoid()
+    if hum then hum.WalkSpeed = SPD_C['Value'] or 16 end
+end
+
+-- ============================================================================
+--  WALKSPEED LOOP
+-- ============================================================================
+RunService.RenderStepped:Connect(function()
+    if isShutdown then return end
+    if SPD_C['Enabled'] and speedEnabled then
+        local hum = getHumanoid()
+        if hum then hum.WalkSpeed = SPD_C['Value'] or 16 end
+    end
+end)
+
+-- Reapply after respawn
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char:WaitForChild('Humanoid')
+    if speedEnabled then
+        char.Humanoid.WalkSpeed = SPD_C['Value'] or 16
+    end
+end)
+
+-- ============================================================================
+--  KEYBINDS
+-- ============================================================================
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed or isShutdown then return end
+    local kc = input.KeyCode
+
+    -- Shutdown
+    if Binds['Shutdown'] and kc == Enum.KeyCode[Binds['Shutdown']:upper()] then
+        isShutdown = true
+        speedEnabled = false
+        resetSpeed()
+        shared.VanityCleanup = nil
+        print("[Vanity] Shutdown.")
+        return
+    end
+
+    -- Speed toggle
+    if SPD_C['Enabled'] and Binds['Speed'] and kc == Enum.KeyCode[Binds['Speed']:upper()] then
+        speedEnabled = not speedEnabled
+        if speedEnabled then
+            applySpeed()
+            print("[Vanity] Speed ON -> " .. (SPD_C['Value'] or 16))
+        else
+            resetSpeed()
+            print("[Vanity] Speed OFF")
+        end
+    end
+end)
+
+-- ============================================================================
+--  CLEANUP FUNCTION
+-- ============================================================================
+shared.VanityCleanup = function()
+    isShutdown  = true
+    speedEnabled = false
+    resetSpeed()
+    print("[Vanity] Cleaned up.")
+end
+
+print("[Vanity] Ready. Press [" .. (Binds['Speed'] or 'X') .. "] to toggle speed.")
