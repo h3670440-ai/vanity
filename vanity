@@ -27,13 +27,16 @@ local Binds = CFG['General']['Binds']
 local SPD_C = CFG['Speed']
 local SA_C  = CFG['Silent Aim']
 local ESP_C = CFG['ESP']
+local RF_C  = CFG['Rapid Fire']
 
 --  STATE
-local speedEnabled  = false
-local isShutdown    = false
-local currentTarget = nil   -- BasePart we are locked onto (for ESP highlight)
-local saLocked      = false  -- whether we have a target locked
-local lockedPlayer  = nil   -- the Player object that is locked
+local speedEnabled     = false
+local rapidFireEnabled  = false
+local isShutdown       = false
+local isMouseDown      = false
+local currentTarget    = nil   -- BasePart we are locked onto (for ESP highlight)
+local saLocked         = false  -- whether we have a target locked
+local lockedPlayer     = nil   -- the Player object that is locked
 
 --  HELPERS
 local function getHumanoid()
@@ -44,6 +47,14 @@ end
 local function resetSpeed()
     local hum = getHumanoid()
     if hum then hum.WalkSpeed = 16 end
+end
+
+local function isHoldingKnife()
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass('Tool')
+    if not tool then return false end
+    local name = tool.Name:lower()
+    return name:find("knife") or name:find("blade") or name:find("fist") or name:find("combat")
 end
 
 local FontMap = {
@@ -389,6 +400,52 @@ do
     shared._VanitySA_Circle   = SilentCircle
 end
 
+--  RAPID FIRE
+do
+    UserInputService.InputBegan:Connect(function(i, gp)
+        if not gp and i.UserInputType == Enum.UserInputType.MouseButton1 then isMouseDown = true end
+    end)
+    UserInputService.InputEnded:Connect(function(i, gp)
+        if not gp and i.UserInputType == Enum.UserInputType.MouseButton1 then isMouseDown = false end
+    end)
+
+    task.spawn(function()
+        while true do
+            if isShutdown then break end
+            if RF_C['Enabled'] and rapidFireEnabled and isMouseDown and not isHoldingKnife() then
+                local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Tool')
+                if tool then
+                    local allowed = true
+                    if RF_C['Specific Weapons']['Enabled'] then
+                        allowed = false
+                        for _, w in ipairs(RF_C['Specific Weapons']['Weapons']) do
+                            if tool.Name == w or tool.Name:find(w:gsub('%[',''):gsub('%]',''), 1, true) then
+                                allowed = true; break
+                            end
+                        end
+                    end
+                    if allowed then tool:Activate() end
+                end
+            end
+            
+            -- Determine cooldown based on Da Hood mode
+            local cd = RF_C['Cooldown'] or 0
+            if RF_C['Da Hood Mode'] and RF_C['Da Hood Mode']['Enabled'] then
+                cd = RF_C['Da Hood Mode']['Cooldown'] or -0.1
+            end
+            
+            if cd > 0 then 
+                task.wait(cd) 
+            elseif cd < 0 then
+                -- Negative cooldown = super rapid fire
+                RunService.RenderStepped:Wait()
+            else 
+                task.wait() 
+            end
+        end
+    end)
+end
+
 --  KEYBINDS
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed or isShutdown then return end
@@ -396,11 +453,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
 
     -- Shutdown
     if Binds['Shutdown'] and kc == Enum.KeyCode[Binds['Shutdown']:upper()] then
-        isShutdown    = true
-        speedEnabled  = false
-        currentTarget = nil
-        saLocked      = false
-        lockedPlayer  = nil
+        isShutdown        = true
+        speedEnabled      = false
+        rapidFireEnabled  = false
+        currentTarget     = nil
+        saLocked          = false
+        lockedPlayer      = nil
         resetSpeed()
         pcall(function()
             setreadonly(shared._VanitySA_GRM, false)
@@ -435,15 +493,22 @@ UserInputService.InputBegan:Connect(function(input, processed)
         end
         print('[Vanity] ESP ' .. (ESP_C['Enabled'] and 'ON' or 'OFF'))
     end
+
+    -- Rapid Fire toggle
+    if RF_C['Enabled'] and Binds['Rapid Fire'] and kc == Enum.KeyCode[Binds['Rapid Fire']:upper()] then
+        rapidFireEnabled = not rapidFireEnabled
+        print('[Vanity] Rapid Fire ' .. (rapidFireEnabled and 'ON' or 'OFF'))
+    end
 end)
 
 --  CLEANUP FUNCTION
 shared.VanityCleanup = function()
-    isShutdown    = true
-    speedEnabled  = false
-    currentTarget = nil
-    saLocked      = false
-    lockedPlayer  = nil
+    isShutdown        = true
+    speedEnabled      = false
+    rapidFireEnabled  = false
+    currentTarget     = nil
+    saLocked          = false
+    lockedPlayer      = nil
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanitySA_GRM, false)
@@ -455,9 +520,10 @@ shared.VanityCleanup = function()
     print('[Vanity] Cleaned up.')
 end
 
-print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | ESP [%s] | Shutdown [%s]',
+print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | ESP [%s] | RF [%s] | Shutdown [%s]',
     Binds['Silent Aim'] or 'Y',
     Binds['Speed']      or 'X',
     Binds['ESP']        or 'H',
+    Binds['Rapid Fire'] or 'L',
     Binds['Shutdown']   or 'P'
 ))
