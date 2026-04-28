@@ -139,7 +139,7 @@ do
         local amount = SM_C['Amount'] or 0
         if amount > 0.5 then return end -- only force to 0 if amount is low
         
-        local props = {'Spread','MaxSpread','Accuracy','MinSpread','Recoil'}
+        local props = {'Spread','MaxSpread','Accuracy','MinSpread','Recoil','FullRecoil','RecoilControl'}
         for _, prop in ipairs(props) do
             local v = tool:FindFirstChild(prop)
             if v and (v:IsA('NumberValue') or v:IsA('IntValue')) then v.Value = 0 end
@@ -471,6 +471,7 @@ do
     local grm         = getrawmetatable(game)
     local oldIndex    = grm.__index
     local oldNewIndex = grm.__newindex
+    local oldNamecall = grm.__namecall
     setreadonly(grm, false)
 
     -- No Jump Cooldown hook
@@ -483,7 +484,34 @@ do
         return oldNewIndex(t, k, v)
     end)
 
-    -- Mouse.Hit hook: Automatic uses closest each frame, Target uses locked player
+    -- Namecall Hook (Silent Aim & Spread Bypass)
+    grm.__namecall = newcclosure(function(self, ...)
+        local args   = {...}
+        local method = getnamecallmethod()
+
+        if not isShutdown and not checkcaller() and method == "FireServer" and gameSettings and self.Name == gameSettings.Remote then
+            if args[1] == gameSettings.Arg then
+                local tgt = nil
+                if SA_C['Mode'] == 'Automatic' then
+                    tgt = getClosestTarget()
+                elseif saLocked and lockedPlayer then
+                    tgt = lockedPlayer
+                end
+
+                if tgt and SA_C['Enabled'] then
+                    local pos = getAimPosition(tgt)
+                    if pos then
+                        args[2] = pos
+                        return oldNamecall(self, unpack(args))
+                    end
+                end
+            end
+        end
+
+        return oldNamecall(self, ...)
+    end)
+
+    -- Mouse.Hit hook: Visual only, Namecall handles the actual server shot
     grm.__index = newcclosure(function(self, key)
         if not isShutdown and not checkcaller() and self == Mouse and SA_C['Enabled'] then
             if key == 'Hit' or key == 'Target' then
@@ -496,11 +524,6 @@ do
                 if tgt then
                     local pos, part = getAimPosition(tgt)
                     if pos then
-                        if MainEvent and gameSettings then
-                            pcall(function()
-                                MainEvent:FireServer(gameSettings.Arg, pos)
-                            end)
-                        end
                         if key == 'Target' then return part or oldIndex(self, key) end
                         return CFrame.new(pos)
                     end
@@ -513,6 +536,7 @@ do
     -- store for cleanup
     shared._VanityOldIndex    = oldIndex
     shared._VanityOldNewIndex = oldNewIndex
+    shared._VanityOldNamecall = oldNamecall
     shared._VanityGRM         = grm
     shared._VanitySA_Circle   = SilentCircle
 
@@ -612,6 +636,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             setreadonly(shared._VanityGRM, false)
             shared._VanityGRM.__index    = shared._VanityOldIndex
             shared._VanityGRM.__newindex = shared._VanityOldNewIndex
+            shared._VanityGRM.__namecall = shared._VanityOldNamecall
             setreadonly(shared._VanityGRM, true)
         end)
         pcall(function() shared._VanitySA_Circle:Remove() end)
@@ -665,6 +690,7 @@ shared.VanityCleanup = function()
         setreadonly(shared._VanityGRM, false)
         shared._VanityGRM.__index    = shared._VanityOldIndex
         shared._VanityGRM.__newindex = shared._VanityOldNewIndex
+        shared._VanityGRM.__namecall = shared._VanityOldNamecall
         setreadonly(shared._VanityGRM, true)
     end)
     pcall(function() shared._VanitySA_Circle:Remove() end)
