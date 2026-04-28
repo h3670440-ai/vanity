@@ -274,7 +274,9 @@ do
 
         -- Tracer
         local tracerCfg = ESP_C['Tracer']
-        if not tracerCfg['Enabled'] or not currentTarget then
+        local isHiddenByEsp = tracerCfg['Sync with ESP'] and not ESP_C['Enabled']
+
+        if not tracerCfg['Enabled'] or not currentTarget or isHiddenByEsp then
             TracerLine.Visible = false
             TracerOutline.Visible = false
         else
@@ -406,10 +408,19 @@ do
         end
     end)
 
-    -- Mouse.Hit metamethod hook
-    local grm      = getrawmetatable(game)
-    local oldIndex = grm.__index
+    --  METAMETHOD HOOKS
+    local grm         = getrawmetatable(game)
+    local oldIndex    = grm.__index
+    local oldNewIndex = grm.__newindex
     setreadonly(grm, false)
+
+    -- No Jump Cooldown hook
+    grm.__newindex = newcclosure(function(t, k, v)
+        if not isShutdown and k == "JumpPower" and CFG['No Jump Cooldown']['Enabled'] then
+            return oldNewIndex(t, k, 50)
+        end
+        return oldNewIndex(t, k, v)
+    end)
 
     -- Mouse.Hit hook: Automatic uses closest each frame, Target uses locked player
     grm.__index = newcclosure(function(self, key)
@@ -438,6 +449,12 @@ do
         return oldIndex(self, key)
     end)
 
+    -- store for cleanup
+    shared._VanityOldIndex    = oldIndex
+    shared._VanityOldNewIndex = oldNewIndex
+    shared._VanityGRM         = grm
+    shared._VanitySA_Circle   = SilentCircle
+
     setreadonly(grm, true)
 
     -- SA keybind — behaviour depends on mode
@@ -464,8 +481,9 @@ do
     end)
 
     -- store for cleanup
-    shared._VanitySA_OldIndex = oldIndex
-    shared._VanitySA_GRM      = grm
+    shared._VanityOldIndex    = oldIndex
+    shared._VanityOldNewIndex = oldNewIndex
+    shared._VanityGRM         = grm
     shared._VanitySA_Circle   = SilentCircle
 end
 
@@ -530,9 +548,10 @@ UserInputService.InputBegan:Connect(function(input, processed)
         lockedPlayer      = nil
         resetSpeed()
         pcall(function()
-            setreadonly(shared._VanitySA_GRM, false)
-            shared._VanitySA_GRM.__index = shared._VanitySA_OldIndex
-            setreadonly(shared._VanitySA_GRM, true)
+            setreadonly(shared._VanityGRM, false)
+            shared._VanityGRM.__index    = shared._VanityOldIndex
+            shared._VanityGRM.__newindex = shared._VanityOldNewIndex
+            setreadonly(shared._VanityGRM, true)
         end)
         pcall(function() shared._VanitySA_Circle:Remove() end)
         pcall(function() TracerLine:Remove() end)
@@ -582,9 +601,10 @@ shared.VanityCleanup = function()
     lockedPlayer      = nil
     resetSpeed()
     pcall(function()
-        setreadonly(shared._VanitySA_GRM, false)
-        shared._VanitySA_GRM.__index = shared._VanitySA_OldIndex
-        setreadonly(shared._VanitySA_GRM, true)
+        setreadonly(shared._VanityGRM, false)
+        shared._VanityGRM.__index    = shared._VanityOldIndex
+        shared._VanityGRM.__newindex = shared._VanityOldNewIndex
+        setreadonly(shared._VanityGRM, true)
     end)
     pcall(function() shared._VanitySA_Circle:Remove() end)
     pcall(function() TracerLine:Remove() end)
