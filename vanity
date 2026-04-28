@@ -100,19 +100,17 @@ end)
 
 --  SPREAD MODIFIER
 do
-    if SM_C and SM_C['Enabled'] and hookfunction then
+    if SM_C and hookfunction then
         local oldRandom
         oldRandom = hookfunction(math.random, function(...)
             local args = {...}
-            if isShutdown or checkcaller() then return oldRandom(...) end
+            if isShutdown or checkcaller() or not SM_C['Enabled'] then return oldRandom(...) end
             
-            -- Detect if this is likely a spread calculation
+            -- Detect if this is likely a spread calculation (loosened detection)
             local isSpread = (#args == 0)
-                or (args[1] and args[2] and args[1] < 0 and args[2] > 0 and math.abs(args[1]) <= 0.2)
+                or (args[1] and args[2] and args[1] < 0 and args[2] > 0 and math.abs(args[1]) <= 0.5)
                 
             if isSpread then
-                if not SM_C['Enabled'] then return oldRandom(...) end
-                
                 if SM_C['Specific Weapons']['Enabled'] then
                     local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Tool')
                     if not tool then return oldRandom(...) end
@@ -130,6 +128,29 @@ do
             return oldRandom(...)
         end)
     end
+
+    -- Property-based spread modification
+    RunService.RenderStepped:Connect(function()
+        if isShutdown or not SM_C or not SM_C['Enabled'] then return end
+        local char = LocalPlayer.Character
+        local tool = char and char:FindFirstChildOfClass('Tool')
+        if not tool then return end
+        
+        local amount = SM_C['Amount'] or 0
+        if amount > 0.5 then return end -- only force to 0 if amount is low
+        
+        local props = {'Spread','MaxSpread','Accuracy','MinSpread','Recoil'}
+        for _, prop in ipairs(props) do
+            local v = tool:FindFirstChild(prop)
+            if v and (v:IsA('NumberValue') or v:IsA('IntValue')) then v.Value = 0 end
+            
+            local gc = tool:FindFirstChild('Configuration') or tool:FindFirstChild('GunConfig')
+            if gc then
+                local r = gc:FindFirstChild(prop)
+                if r and (r:IsA('NumberValue') or r:IsA('IntValue')) then r.Value = 0 end
+            end
+        end
+    end)
 end
 
 --  ESP
@@ -250,6 +271,7 @@ do
         { ID = 102372656720272, Arg = "UpdateMousePosI",     Remote = "MainEvent"      }, -- Dee Hood
         { ID = 138293393214382, Arg = "DERHOODMOUSEPOS666^", Remote = "MainRemoteEvent" }, -- Der Hood
         { ID = 98930372136494,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- AR Hood
+        { ID = 98391891715494,  Arg = "UpdateMousePosI2",    Remote = "MainEvent"      }, -- Specific Game
         { ID = 76565633209271,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- OG Da Hood (alt)
         { ID = 88582222971530,  Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Del Hood Aim
         { ID = 113357850268933, Arg = "UpdateMousePos",      Remote = "MainEvent"      }, -- Da Kitty
