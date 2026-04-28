@@ -280,7 +280,7 @@ do
         else
             local sp, on = Camera:WorldToViewportPoint(currentTarget.Position)
             if on and sp.Z > 0 then
-                local startPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                local startPos = UserInputService:GetMouseLocation()
                 local endPos   = Vector2.new(sp.X, sp.Y)
 
                 TracerOutline.From         = startPos
@@ -306,6 +306,7 @@ do
     local function getClosestTarget()
         local fov        = SA_C['Fov']
         local fovEnabled = fov['Enabled']
+        local selMode    = SA_C['Selection Mode'] or 'Mouse'
         local fovRad     = fovEnabled and ((fov['Value'] or 13) * 12) or math.huge
         local mp         = UserInputService:GetMouseLocation()
         local best, tgt  = math.huge, nil
@@ -319,18 +320,15 @@ do
             local hrp = char:FindFirstChild('HumanoidRootPart')
             if not hrp then continue end
 
-            if fovEnabled then
-                local sp, on = Camera:WorldToViewportPoint(hrp.Position)
-                if on and sp.Z > 0 then
-                    local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
-                    if d <= fovRad and d < best then
-                        best, tgt = d, plr
-                    end
-                end
-            else
-                local dist = (hrp.Position - Camera.CFrame.Position).Magnitude
-                if dist < best then
-                    best, tgt = dist, plr
+            local sp, on    = Camera:WorldToViewportPoint(hrp.Position)
+            local mouseDist = (on and sp.Z > 0) and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or math.huge
+            local realDist  = (hrp.Position - Camera.CFrame.Position).Magnitude
+            local inFov     = (not fovEnabled) or (mouseDist <= fovRad)
+
+            if inFov then
+                local metric = (selMode == 'Mouse') and mouseDist or realDist
+                if metric < best then
+                    best, tgt = metric, plr
                 end
             end
         end
@@ -343,21 +341,20 @@ do
         local char  = plr.Character
         local parts = SA_C['Hit Location']['Parts']
         local mp    = UserInputService:GetMouseLocation()
+        local selMode = SA_C['Selection Mode'] or 'Mouse'
         local fovEnabled = SA_C['Fov']['Enabled']
         local best, bd = nil, math.huge
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
             if part and part:IsA('BasePart') then
-                if fovEnabled then
-                    local sp, on = Camera:WorldToViewportPoint(part.Position)
-                    if on then
-                        local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
-                        if d < bd then bd = d; best = part end
-                    end
-                else
-                    local d = (part.Position - Camera.CFrame.Position).Magnitude
-                    if d < bd then bd = d; best = part end
+                local sp, on    = Camera:WorldToViewportPoint(part.Position)
+                local mouseDist = (on and sp.Z > 0) and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or math.huge
+                local realDist  = (part.Position - Camera.CFrame.Position).Magnitude
+                
+                local metric = (selMode == 'Mouse') and mouseDist or realDist
+                if metric < bd then
+                    bd, best = metric, part
                 end
             end
         end
