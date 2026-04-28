@@ -176,7 +176,8 @@ RunService.RenderStepped:Connect(function()
         local isTarget = currentTarget ~= nil
             and currentTarget.Parent == char
 
-        lbl.Text       = player.Name
+        local nameMode = ESP_C['Mode'] or 'Username'
+        lbl.Text       = (nameMode == 'DisplayName') and player.DisplayName or player.Name
         lbl.TextColor3 = isTarget
             and (ESP_C['Target Color'] or Color3.fromRGB(255, 60, 60))
             or  (ESP_C['Color']        or Color3.fromRGB(220, 220, 220))
@@ -239,8 +240,28 @@ do
     SilentCircle.Color       = Color3.fromRGB(255, 255, 255)
     SilentCircle.Visible     = false
 
+    -- Target Tracer
+    local TracerOutline = Drawing.new('Line')
+    TracerOutline.Thickness    = 3
+    TracerOutline.Transparency = 1
+    TracerOutline.Color        = Color3.fromRGB(0, 0, 0)
+    TracerOutline.Visible      = false
+
+    local TracerLine = Drawing.new('Line')
+    TracerLine.Thickness    = 1
+    TracerLine.Transparency = 1
+    TracerLine.Color        = Color3.fromRGB(255, 60, 60)
+    TracerLine.Visible      = false
+
     RunService.RenderStepped:Connect(function()
-        if isShutdown or not SA_C['Enabled'] then SilentCircle.Visible = false; return end
+        if isShutdown or not SA_C['Enabled'] then 
+            SilentCircle.Visible = false
+            TracerLine.Visible = false
+            TracerOutline.Visible = false
+            return 
+        end
+        
+        -- FOV Circle
         local fov = SA_C['Fov']
         if fov['Enabled'] and fov['Show Fov'] then
             local mp = UserInputService:GetMouseLocation()
@@ -250,14 +271,44 @@ do
         else
             SilentCircle.Visible = false
         end
+
+        -- Tracer
+        local tracerCfg = ESP_C['Tracer']
+        if not tracerCfg['Enabled'] or not currentTarget then
+            TracerLine.Visible = false
+            TracerOutline.Visible = false
+        else
+            local sp, on = Camera:WorldToViewportPoint(currentTarget.Position)
+            if on and sp.Z > 0 then
+                local startPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                local endPos   = Vector2.new(sp.X, sp.Y)
+
+                TracerOutline.From         = startPos
+                TracerOutline.To           = endPos
+                TracerOutline.Thickness    = (tracerCfg['Thickness'] or 1) + 2
+                TracerOutline.Transparency = tracerCfg['Transparency'] or 1
+                TracerOutline.Visible      = true
+
+                TracerLine.From            = startPos
+                TracerLine.To              = endPos
+                TracerLine.Thickness       = tracerCfg['Thickness'] or 1
+                TracerLine.Transparency    = tracerCfg['Transparency'] or 1
+                TracerLine.Color           = tracerCfg['Color'] or Color3.fromRGB(255, 60, 60)
+                TracerLine.Visible         = true
+            else
+                TracerLine.Visible = false
+                TracerOutline.Visible = false
+            end
+        end
     end)
 
     -- Find closest player within FOV (no checks — targets everyone)
     local function getClosestTarget()
-        local fov    = SA_C['Fov']
-        local fovRad = fov['Enabled'] and ((fov['Value'] or 13) * 12) or math.huge
-        local mp     = UserInputService:GetMouseLocation()
-        local best, tgt = math.huge, nil
+        local fov        = SA_C['Fov']
+        local fovEnabled = fov['Enabled']
+        local fovRad     = fovEnabled and ((fov['Value'] or 13) * 12) or math.huge
+        local mp         = UserInputService:GetMouseLocation()
+        local best, tgt  = math.huge, nil
 
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr == LocalPlayer then continue end
@@ -268,11 +319,18 @@ do
             local hrp = char:FindFirstChild('HumanoidRootPart')
             if not hrp then continue end
 
-            local sp, on = Camera:WorldToViewportPoint(hrp.Position)
-            if on and sp.Z > 0 then
-                local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
-                if d <= fovRad and d < best then
-                    best, tgt = d, plr
+            if fovEnabled then
+                local sp, on = Camera:WorldToViewportPoint(hrp.Position)
+                if on and sp.Z > 0 then
+                    local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                    if d <= fovRad and d < best then
+                        best, tgt = d, plr
+                    end
+                end
+            else
+                local dist = (hrp.Position - Camera.CFrame.Position).Magnitude
+                if dist < best then
+                    best, tgt = dist, plr
                 end
             end
         end
@@ -285,14 +343,20 @@ do
         local char  = plr.Character
         local parts = SA_C['Hit Location']['Parts']
         local mp    = UserInputService:GetMouseLocation()
+        local fovEnabled = SA_C['Fov']['Enabled']
         local best, bd = nil, math.huge
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
             if part and part:IsA('BasePart') then
-                local sp, on = Camera:WorldToViewportPoint(part.Position)
-                if on then
-                    local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                if fovEnabled then
+                    local sp, on = Camera:WorldToViewportPoint(part.Position)
+                    if on then
+                        local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+                        if d < bd then bd = d; best = part end
+                    end
+                else
+                    local d = (part.Position - Camera.CFrame.Position).Magnitude
                     if d < bd then bd = d; best = part end
                 end
             end
@@ -466,6 +530,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
             setreadonly(shared._VanitySA_GRM, true)
         end)
         pcall(function() shared._VanitySA_Circle:Remove() end)
+        pcall(function() TracerLine:Remove() end)
+        pcall(function() TracerOutline:Remove() end)
         pcall(function() espGui:Destroy() end)
         shared.VanityCleanup = nil
         print('[Vanity] Shutdown.')
@@ -516,6 +582,8 @@ shared.VanityCleanup = function()
         setreadonly(shared._VanitySA_GRM, true)
     end)
     pcall(function() shared._VanitySA_Circle:Remove() end)
+    pcall(function() TracerLine:Remove() end)
+    pcall(function() TracerOutline:Remove() end)
     pcall(function() espGui:Destroy() end)
     print('[Vanity] Cleaned up.')
 end
