@@ -63,6 +63,58 @@ local function isHoldingKnife()
     return name:find("knife") or name:find("blade") or name:find("fist") or name:find("combat")
 end
 
+local function getGunBarrel()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, tool in pairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool:FindFirstChild("Handle") then
+            return tool.Handle
+        end
+    end
+    return nil
+end
+
+local function shouldBlockAntiCurve(targetPart, targetPosition)
+    local antiCurve = SA_C['Anti Curve']
+    if not antiCurve or not antiCurve['Enabled'] then return false end
+    if antiCurve['Mode'] ~= 'Angles' then return false end
+    
+    local gunBarrel = getGunBarrel()
+    if not gunBarrel then return false end
+    
+    local barrelPos = gunBarrel.Position
+    local cameraPos = Camera.CFrame.Position
+    local mousePos = UserInputService:GetMouseLocation()
+    local mouseRay = Camera:ScreenPointToRay(mousePos.X, mousePos.Y)
+    
+    local toTarget = (targetPosition - cameraPos).Unit
+    local aimDirection = mouseRay.Direction.Unit
+    local dotProduct = toTarget:Dot(aimDirection)
+    dotProduct = math.clamp(dotProduct, -1, 1)
+    local angle = math.deg(math.acos(dotProduct))
+    
+    local distanceToTarget = (targetPosition - barrelPos).Magnitude
+    local maxDistance = antiCurve['Angles']['Distance Threshold'] or 100
+    local maxAngle = antiCurve['Angles']['Max Angle'] or 15
+    
+    if distanceToTarget <= maxDistance and angle > maxAngle then
+        return true
+    end
+    
+    return false
+end
+
+local function isClientRedirectionWeapon()
+    if not SA_C['Client Redirection'] or not SA_C['Client Redirection']['Enabled'] then return false end
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass('Tool')
+    if not tool then return false end
+    for _, name in ipairs(SA_C['Client Redirection']['Weapons'] or {}) do
+        if tool.Name == name or tool.Name:lower():find(name:lower(), 1, true) then return true end
+    end
+    return false
+end
+
 local function clIsKnocked(char)
     if not Checks['Knocked'] then return false end
     if not char then return false end
@@ -667,14 +719,25 @@ do
         return tgt
     end
 
+    local DefaultParts = {
+        'Head', 'UpperTorso', 'HumanoidRootPart', 'LowerTorso',
+        'LeftHand',     'RightHand',
+        'LeftLowerArm', 'RightLowerArm',
+        'LeftUpperArm', 'RightUpperArm',
+        'LeftFoot',     'RightFoot',
+        'LeftLowerLeg', 'RightLowerLeg',
+        'LeftUpperLeg', 'RightUpperLeg'
+    }
+
     -- Get the best body part to aim at on the target
     local function getAimPosition(plr)
         if not plr or not plr.Character then return nil, nil end
-        local char    = plr.Character
-        local parts   = SA_C['Hit Location']['Parts']
-        local mp      = UserInputService:GetMouseLocation()
-        local selMode = SA_C['Selection Mode'] or 'Mouse'
-        local best, bd = nil, math.huge
+        local char      = plr.Character
+        local configParts = SA_C['Hit Location']['Parts']
+        local parts     = (configParts == nil or configParts == 'All') and DefaultParts or configParts
+        local mp        = UserInputService:GetMouseLocation()
+        local selMode   = SA_C['Selection Mode'] or 'Mouse'
+        local best, bd  = nil, math.huge
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
@@ -693,11 +756,32 @@ do
 
         if not best then return nil, nil end
 
-        local predSets  = SA_C['Prediction']['Sets']
-        local predLevel = SA_C['Prediction']['Level'] or 'Low'
-        local predVal   = predSets[predLevel] or 0
-        local vel       = best.AssemblyLinearVelocity or Vector3.new()
-        return best.Position + vel * predVal, best
+        local predVal = 0
+        if SA_C['Auto Prediction'] and SA_C['Auto Prediction']['Enabled'] then
+            local ping = LocalPlayer:GetNetworkPing() * 1000
+            if ping < 50 then
+                predVal = 0.12
+            elseif ping < 100 then
+                predVal = 0.133
+            elseif ping < 150 then
+                predVal = 0.15
+            else
+                predVal = 0.17
+            end
+        else
+            local predSets  = SA_C['Prediction']['Sets']
+            local predLevel = SA_C['Prediction']['Level'] or 'Low'
+            predVal = predSets[predLevel] or 0
+        end
+
+        local vel = best.AssemblyLinearVelocity or Vector3.new()
+        local predictedPosition = best.Position + vel * predVal
+        
+        if shouldBlockAntiCurve(best, predictedPosition) then
+            return nil, nil
+        end
+
+        return predictedPosition, best
     end
 
     -- RenderStepped: update targets
@@ -788,13 +872,14 @@ do
         return oldNewIndex(t, k, v)
     end)
 
-    -- Namecall Hook (Silent Aim & Spread Bypass)
+    -- Namecall Hook (Silent Aim & Spread Bypass & Client Redirection)
     grm.__namecall = newcclosure(function(self, ...)
         local args   = {...}
         local method = getnamecallmethod()
 
-        if not isShutdown and not checkcaller() and method == "FireServer" and gameSettings and self.Name == gameSettings.Remote then
-            if args[1] == gameSettings.Arg then
+        if not isShutdown and not checkcaller() and method == "FireServer" then
+            -- Da Hood standard remotes
+            if gameSettings and self.Name == gameSettings.Remote and args[1] == gameSettings.Arg then
                 local tgt = nil
                 if SA_C['Mode'] == 'Automatic' then
                     tgt = getClosestTarget()
@@ -806,6 +891,30 @@ do
                     local pos = getAimPosition(tgt)
                     if pos then
                         args[2] = pos
+                        return oldNamecall(self, unpack(args))
+                    end
+                end
+            end
+            
+            -- Client Redirection
+            if isClientRedirectionWeapon() then
+                local tgt = nil
+                if SA_C['Mode'] == 'Automatic' then
+                    tgt = getClosestTarget()
+                elseif saLocked and lockedPlayer then
+                    tgt = lockedPlayer
+                end
+
+                if tgt and SA_C['Enabled'] then
+                    local pos = getAimPosition(tgt)
+                    if pos then
+                        -- Redirect the shot position argument (usually args[2] or first Vector3)
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = pos
+                                break
+                            end
+                        end
                         return oldNamecall(self, unpack(args))
                     end
                 end
