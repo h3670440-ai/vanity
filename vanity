@@ -182,6 +182,39 @@ local function isTargetDead(player, feature)
     return false
 end
 
+local function isFullyVisible(targetPart)
+    if not SA_C['Auto Shoot'] or not SA_C['Auto Shoot']['Full Check'] then
+        return canSeeTarget(targetPart)
+    end
+    
+    if not targetPart or not targetPart.Parent then return false end
+    local char = targetPart.Parent
+    local localChar = LocalPlayer.Character
+    if not localChar then return false end
+    
+    local origin = Camera.CFrame.Position
+    local targetPos = targetPart.Position
+    
+    -- Check 1: Can we see them?
+    rayParams.FilterDescendantsInstances = { localChar, char }
+    local result = workspace:Raycast(origin, targetPos - origin, rayParams)
+    local canSeeThem = (result == nil or result.Instance:IsDescendantOf(char))
+    
+    if not canSeeThem then return false end
+    
+    -- Check 2: Can they see us? (Bi-directional check)
+    local targetHead = char:FindFirstChild("Head") or targetPart
+    local localHead = localChar:FindFirstChild("Head") or localChar:FindFirstChild("HumanoidRootPart")
+    if targetHead and localHead then
+        rayParams.FilterDescendantsInstances = { localChar, char }
+        local result2 = workspace:Raycast(targetHead.Position, localHead.Position - targetHead.Position, rayParams)
+        local theyCanSeeUs = (result2 == nil or result2.Instance:IsDescendantOf(localChar))
+        return theyCanSeeUs
+    end
+    
+    return canSeeThem
+end
+
 local function getBodyParts(character)
     return {
         character:FindFirstChild("Head"),
@@ -1094,6 +1127,35 @@ do
     shared._VanityCL_Circle   = CLFovCircle
 
     setreadonly(grm, true)
+
+    --  AUTO SHOOT
+    local lastAutoShoot = 0
+    RunService.Heartbeat:Connect(function()
+        if isShutdown or not SA_C['Auto Shoot'] or not SA_C['Auto Shoot']['Enabled'] then return end
+        if isHoldingKnife() or isChatFocused() then return end
+        
+        local now = tick()
+        local delay = SA_C['Auto Shoot']['Delay'] or 0.05
+        if now - lastAutoShoot < delay then return end
+        
+        local tgt = nil
+        if SA_C['Mode'] == 'Automatic' then
+            tgt = getClosestTarget()
+        elseif saLocked and lockedPlayer then
+            tgt = lockedPlayer
+        end
+        
+        if tgt then
+            local pos, part = getAimPosition(tgt)
+            if part and isFullyVisible(part) then
+                local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                if tool then
+                    tool:Activate()
+                    lastAutoShoot = now
+                end
+            end
+        end
+    end)
 
     -- SA keybind — behaviour depends on mode
     UserInputService.InputBegan:Connect(function(input, gp)
