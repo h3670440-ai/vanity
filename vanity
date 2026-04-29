@@ -282,7 +282,48 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
+
+    -- // AGGRESSIVE METHODS FOR SPECIFIC GAME ID
+    if game.PlaceId == 130513896791647 then
+        -- ModuleScript Hooking
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("ModuleScript") then
+                pcall(function()
+                    local s = require(v)
+                    if type(s) == "table" then
+                        for _, p in ipairs(props) do
+                            if s[p] then s[p] = range end
+                            -- Case insensitive check
+                            for k, val in pairs(s) do
+                                if type(k) == "string" and k:lower() == p:lower() then
+                                    s[k] = range
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end
 end)
+
+-- Metamethod Hook for Range (Aggressive)
+do
+    if game.PlaceId == 130513896791647 then
+        local gmt = getrawmetatable(game)
+        local oldIndex = gmt.__index
+        setreadonly(gmt, false)
+        gmt.__index = newcclosure(function(t, k)
+            if not isShutdown and not checkcaller() and IR_C['Enabled'] then
+                if k == "Range" or k == "MaxRange" or k == "Distance" or k == "BulletRange" then
+                    return 9e9
+                end
+            end
+            return oldIndex(t, k)
+        end)
+        setreadonly(gmt, true)
+    end
+end
 
 --  SPREAD MODIFIER
 do
