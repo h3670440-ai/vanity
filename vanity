@@ -75,7 +75,49 @@ local function getGunBarrel()
     return nil
 end
 
+local function shouldBlockAntiCurve(targetPart, targetPosition)
+    local antiCurve = SA_C['Anti Curve']
+    if not antiCurve or not antiCurve['Enabled'] then return false end
+    if antiCurve['Mode'] ~= 'Angles' then return false end
+    
+    local gunBarrel = getGunBarrel()
+    if not gunBarrel then return false end
+    
+    local barrelPos = gunBarrel.Position
+    local cameraPos = Camera.CFrame.Position
+    local mousePos = UserInputService:GetMouseLocation()
+    local mouseRay = Camera:ScreenPointToRay(mousePos.X, mousePos.Y)
+    
+    local toTarget = (targetPosition - cameraPos).Unit
+    local aimDirection = mouseRay.Direction.Unit
+    local dotProduct = toTarget:Dot(aimDirection)
+    dotProduct = math.clamp(dotProduct, -1, 1)
+    local angle = math.deg(math.acos(dotProduct))
+    
+    local distanceToTarget = (targetPosition - barrelPos).Magnitude
+    local maxDistance = antiCurve['Angles']['Distance Threshold'] or 100
+    local maxAngle = antiCurve['Angles']['Max Angle'] or 15
+    
+    if distanceToTarget <= maxDistance and angle > maxAngle then
+        return true
+    end
+    
+    return false
+end
+
+local function isClientRedirectionWeapon()
+    if not SA_C['Client Redirection'] or not SA_C['Client Redirection']['Enabled'] then return false end
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass('Tool')
+    if not tool then return false end
+    for _, name in ipairs(SA_C['Client Redirection']['Weapons'] or {}) do
+        if tool.Name == name or tool.Name:lower():find(name:lower(), 1, true) then return true end
+    end
+    return false
+end
+
 local function clIsKnocked(char)
+    if not Checks['Knocked'] then return false end
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
@@ -92,18 +134,87 @@ local function clIsKnocked(char)
     return false
 end
 
+local function isPlayerGrabbed(player)
+    if not Checks['Grabbed'] then return false end
+    if not player.Character then return false end
+    return player.Character:FindFirstChild('GRABBING_CONSTRAINT') ~= nil
+end
 
+local function isChatFocused()
+    if not Checks['Chat Focused'] then return false end
+    local chatBar = LocalPlayer:FindFirstChild("PlayerGui")
+    if chatBar then
+        chatBar = chatBar:FindFirstChild("Chat")
+        if chatBar then
+            chatBar = chatBar:FindFirstChild("Frame")
+            if chatBar then
+                chatBar = chatBar:FindFirstChild("ChatBarParentFrame")
+                if chatBar and chatBar.Visible then return true end
+            end
+        end
+    end
+    return false
+end
 
+local rayParams = RaycastParams.new()
+rayParams.FilterType  = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
 
-local DefaultParts = {
-    'Head', 'UpperTorso', 'HumanoidRootPart', 'LowerTorso',
-    'LeftHand',     'RightHand',
-    'LeftLowerArm', 'RightLowerArm',
-    'LeftUpperArm', 'RightUpperArm',
-    'LeftFoot',     'RightFoot',
-    'LeftLowerLeg', 'RightLowerLeg',
-    'LeftUpperLeg', 'RightUpperLeg'
-}
+local function canSeeTarget(part)
+    if not Checks['Visible'] then return true end
+    if not part or not part.Parent then return false end
+    local char = part.Parent
+    rayParams.FilterDescendantsInstances = { LocalPlayer.Character, char }
+    local origin = Camera.CFrame.Position
+    local result = workspace:Raycast(origin, part.Position - origin, rayParams)
+    return result == nil or result.Instance:IsDescendantOf(char)
+end
+
+local function isTargetDead(player, feature)
+    local check = Checks['Unlock on Death']
+    if not check or not check['Enabled'] then return false end
+    if not table.find(check['Apply To'], feature) then return false end
+    
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= (check['Health'] or 4) then
+        return true
+    end
+    return false
+end
+
+local function isFullyVisible(targetPart)
+    if not SA_C['Auto Shoot'] or not SA_C['Auto Shoot']['Full Check'] then
+        return canSeeTarget(targetPart)
+    end
+    
+    if not targetPart or not targetPart.Parent then return false end
+    local char = targetPart.Parent
+    local localChar = LocalPlayer.Character
+    if not localChar then return false end
+    
+    local origin = Camera.CFrame.Position
+    local targetPos = targetPart.Position
+    
+    -- Check 1: Can we see them?
+    rayParams.FilterDescendantsInstances = { localChar, char }
+    local result = workspace:Raycast(origin, targetPos - origin, rayParams)
+    local canSeeThem = (result == nil or result.Instance:IsDescendantOf(char))
+    
+    if not canSeeThem then return false end
+    
+    -- Check 2: Can they see us? (Bi-directional check)
+    local targetHead = char:FindFirstChild("Head") or targetPart
+    local localHead = localChar:FindFirstChild("Head") or localChar:FindFirstChild("HumanoidRootPart")
+    if targetHead and localHead then
+        rayParams.FilterDescendantsInstances = { localChar, char }
+        local result2 = workspace:Raycast(targetHead.Position, localHead.Position - targetHead.Position, rayParams)
+        local theyCanSeeUs = (result2 == nil or result2.Instance:IsDescendantOf(localChar))
+        return theyCanSeeUs
+    end
+    
+    return canSeeThem
+end
 
 local function getBodyParts(character)
     return {
@@ -119,7 +230,6 @@ local function getBodyParts(character)
         character:FindFirstChild("LeftFoot"),      character:FindFirstChild("RightFoot"),
     }
 end
-
 
 local function getClosestBodyPart(character)
     local best, bd = nil, math.huge
@@ -137,6 +247,7 @@ local function getClosestBodyPart(character)
 end
 
 local function clFindClosest()
+    if isChatFocused() then return nil end
     local mp       = UserInputService:GetMouseLocation()
     local fovCfg   = CL_C['FOV'] or {}
     local fovLimit = (fovCfg['Enabled'] and fovCfg['Size']) or math.huge
@@ -145,6 +256,8 @@ local function clFindClosest()
         if player == LocalPlayer then continue end
         local char = player.Character
         if not char or clIsKnocked(char) then continue end
+        if isTargetDead(player, "Camera Lock") then continue end
+        if isPlayerGrabbed(player) then continue end
         local hum = char:FindFirstChildOfClass('Humanoid')
         if not hum or hum.Health <= 0 then continue end
         local hrp = char:FindFirstChild('HumanoidRootPart')
@@ -679,6 +792,19 @@ do
     SilentCircle.Color       = Color3.fromRGB(255, 255, 255)
     SilentCircle.Visible     = false
 
+    -- Target Tracer
+    local TracerOutline = Drawing.new('Line')
+    TracerOutline.Thickness    = 3
+    TracerOutline.Transparency = 1
+    TracerOutline.Color        = Color3.fromRGB(0, 0, 0)
+    TracerOutline.Visible      = false
+
+    local TracerLine = Drawing.new('Line')
+    TracerLine.Thickness    = 1
+    TracerLine.Transparency = 1
+    TracerLine.Color        = Color3.fromRGB(255, 60, 60)
+    TracerLine.Visible      = false
+
     -- Camlock FOV circle
     local CLFovCircle = Drawing.new("Circle")
     CLFovCircle.Filled       = false
@@ -687,11 +813,12 @@ do
     CLFovCircle.Transparency = 1
     CLFovCircle.Visible      = false
 
-
     RunService.RenderStepped:Connect(function()
         if isShutdown then 
             SilentCircle.Visible = false
             CLFovCircle.Visible = false
+            TracerLine.Visible = false
+            TracerOutline.Visible = false
             return 
         end
         
@@ -720,11 +847,42 @@ do
         else
             CLFovCircle.Visible = false
         end
-    end)
 
+        -- Tracer
+        local tracerCfg = ESP_C['Tracer']
+        local isHiddenByEsp = tracerCfg['Sync with ESP'] and not ESP_C['Enabled']
+
+        if not tracerCfg['Enabled'] or not currentTarget or isHiddenByEsp then
+            TracerLine.Visible = false
+            TracerOutline.Visible = false
+        else
+            local sp, on = Camera:WorldToViewportPoint(currentTarget.Position)
+            if on and sp.Z > 0 then
+                local startPos = UserInputService:GetMouseLocation()
+                local endPos   = Vector2.new(sp.X, sp.Y)
+
+                TracerOutline.From         = startPos
+                TracerOutline.To           = endPos
+                TracerOutline.Thickness    = (tracerCfg['Thickness'] or 1) + 2
+                TracerOutline.Transparency = tracerCfg['Transparency'] or 1
+                TracerOutline.Visible      = true
+
+                TracerLine.From            = startPos
+                TracerLine.To              = endPos
+                TracerLine.Thickness       = tracerCfg['Thickness'] or 1
+                TracerLine.Transparency    = tracerCfg['Transparency'] or 1
+                TracerLine.Color           = tracerCfg['Color'] or Color3.fromRGB(255, 60, 60)
+                TracerLine.Visible         = true
+            else
+                TracerLine.Visible = false
+                TracerOutline.Visible = false
+            end
+        end
+    end)
 
     -- Find closest player within FOV (no checks — targets everyone)
     local function getClosestTarget()
+        if isChatFocused() then return nil end
         local fov        = SA_C['Fov']
         local fovEnabled = fov['Enabled']
         local selMode    = SA_C['Selection Mode'] or 'Mouse'
@@ -735,7 +893,9 @@ do
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr == LocalPlayer then continue end
             local char = plr.Character
-            if not char then continue end
+            if not char or clIsKnocked(char) then continue end
+            if isTargetDead(plr, "Silent Aim") then continue end
+            if isPlayerGrabbed(plr) then continue end
             local hum = char:FindFirstChildOfClass('Humanoid')
             if not hum or hum.Health <= 0 then continue end
             local hrp = char:FindFirstChild('HumanoidRootPart')
@@ -764,7 +924,6 @@ do
         return tgt
     end
 
-
     local DefaultParts = {
         'Head', 'UpperTorso', 'HumanoidRootPart', 'LowerTorso',
         'LeftHand',     'RightHand',
@@ -779,7 +938,7 @@ do
     local function getAimPosition(plr)
         if not plr or not plr.Character then return nil, nil end
         local char      = plr.Character
-        local configParts = SA_C['Hit Location'] and SA_C['Hit Location']['Parts']
+        local configParts = SA_C['Hit Location']['Parts']
         local parts     = (configParts == nil or configParts == 'All') and DefaultParts or configParts
         local mp        = UserInputService:GetMouseLocation()
         local selMode   = SA_C['Selection Mode'] or 'Mouse'
@@ -787,7 +946,7 @@ do
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
-            if part and part:IsA('BasePart') then
+            if part and part:IsA('BasePart') and canSeeTarget(part) then
                 local sp, on    = Camera:WorldToViewportPoint(part.Position)
                 local isOnScreen = (on and sp.Z > 0)
                 local mouseDist = isOnScreen and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or 50000
@@ -802,14 +961,33 @@ do
 
         if not best then return nil, nil end
 
-        local predSets  = SA_C['Prediction']['Sets']
-        local predLevel = SA_C['Prediction']['Level'] or 'Low'
-        local predVal   = predSets[predLevel] or 0
-        local vel       = best.AssemblyLinearVelocity or Vector3.new()
-        return best.Position + vel * predVal, best
+        local predVal = 0
+        if SA_C['Auto Prediction'] and SA_C['Auto Prediction']['Enabled'] then
+            local ping = LocalPlayer:GetNetworkPing() * 1000
+            if ping < 50 then
+                predVal = 0.12
+            elseif ping < 100 then
+                predVal = 0.133
+            elseif ping < 150 then
+                predVal = 0.15
+            else
+                predVal = 0.17
+            end
+        else
+            local predSets  = SA_C['Prediction']['Sets']
+            local predLevel = SA_C['Prediction']['Level'] or 'Low'
+            predVal = predSets[predLevel] or 0
+        end
+
+        local vel = best.AssemblyLinearVelocity or Vector3.new()
+        local predictedPosition = best.Position + vel * predVal
+        
+        if shouldBlockAntiCurve(best, predictedPosition) then
+            return nil, nil
+        end
+
+        return predictedPosition, best
     end
-
-
 
     -- RenderStepped: update targets
     RunService.RenderStepped:Connect(function()
@@ -830,8 +1008,8 @@ do
                     currentTarget = nil
                 end
             else -- 'Target' mode: track the locked player
-                if not saLocked or not lockedPlayer then
-                    currentTarget = nil
+                if not saLocked or not lockedPlayer or isTargetDead(lockedPlayer, "Silent Aim") then
+                    saLocked = false; lockedPlayer = nil; currentTarget = nil
                 else
                     local char = lockedPlayer.Character
                     local hum  = char and char:FindFirstChildOfClass('Humanoid')
@@ -844,7 +1022,6 @@ do
                 end
             end
         end
-
 
         --  CAMERA LOCK AIM
         if CL_C['Enabled'] then
@@ -860,7 +1037,8 @@ do
 
             if camLocked and camTarget and not isHoldingKnife() then
                 local char = camTarget.Parent
-                if not char or clIsKnocked(char) then
+                local p = char and Players:GetPlayerFromCharacter(char)
+                if not char or clIsKnocked(char) or (p and isTargetDead(p, "Camera Lock")) then
                     camLocked = false; camTarget = nil
                 else
                     local hitPart = CL_C['Hit Part'] or 'HumanoidRootPart'
@@ -900,13 +1078,20 @@ do
         return oldNewIndex(t, k, v)
     end)
 
-    -- Namecall Hook (Silent Aim & Spread Bypass)
+    -- Namecall Hook (Silent Aim & Spread Bypass & Client Redirection)
     grm.__namecall = newcclosure(function(self, ...)
         local args   = {...}
         local method = getnamecallmethod()
 
-        if not isShutdown and not checkcaller() and method == "FireServer" and gameSettings and self.Name == gameSettings.Remote then
-            if args[1] == gameSettings.Arg then
+        if not isShutdown and not checkcaller() and method == "FireServer" then
+            -- Da Hood standard remotes
+            if gameSettings and self.Name == gameSettings.Remote and args[1] == gameSettings.Arg then
+                local aav = CFG['Anti Aim View']
+                if aav and aav['Enabled'] then
+                    args[2] = Mouse.Hit.Position
+                    return oldNamecall(self, unpack(args))
+                end
+
                 local tgt = nil
                 if SA_C['Mode'] == 'Automatic' then
                     tgt = getClosestTarget()
@@ -922,11 +1107,34 @@ do
                     end
                 end
             end
+            
+            -- Client Redirection
+            if isClientRedirectionWeapon() then
+                local tgt = nil
+                if SA_C['Mode'] == 'Automatic' then
+                    tgt = getClosestTarget()
+                elseif saLocked and lockedPlayer then
+                    tgt = lockedPlayer
+                end
+
+                if tgt and SA_C['Enabled'] then
+                    local pos = getAimPosition(tgt)
+                    if pos then
+                        -- Redirect the shot position argument (usually args[2] or first Vector3)
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = pos
+                                break
+                            end
+                        end
+                        return oldNamecall(self, unpack(args))
+                    end
+                end
+            end
         end
 
         return oldNamecall(self, ...)
     end)
-
 
     -- Mouse.Hit hook: Visual only, Namecall handles the actual server shot
     grm.__index = newcclosure(function(self, key)
@@ -960,7 +1168,53 @@ do
 
     setreadonly(grm, true)
 
+    -- // ANTI AIM VIEW (SCARCIN BYPASS)
+    local function setupAAV(char)
+        char.ChildAdded:Connect(function(child)
+            local aav = CFG['Anti Aim View']
+            if child:IsA("Tool") and aav and aav['Enabled'] then
+                child.Activated:Connect(function()
+                    if gameSettings and gameSettings.Remote == "MainEvent" then
+                        local mainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+                        if mainEvent then
+                            mainEvent:FireServer("UpdateMousePos", Mouse.Hit.Position)
+                        end
+                    end
+                end)
+            end
+        end)
+    end
+    LocalPlayer.CharacterAdded:Connect(setupAAV)
+    if LocalPlayer.Character then setupAAV(LocalPlayer.Character) end
 
+    --  AUTO SHOOT
+    local lastAutoShoot = 0
+    RunService.Heartbeat:Connect(function()
+        if isShutdown or not SA_C['Auto Shoot'] or not SA_C['Auto Shoot']['Enabled'] then return end
+        if isHoldingKnife() or isChatFocused() then return end
+        
+        local now = tick()
+        local delay = SA_C['Auto Shoot']['Delay'] or 0.05
+        if now - lastAutoShoot < delay then return end
+        
+        local tgt = nil
+        if SA_C['Mode'] == 'Automatic' then
+            tgt = getClosestTarget()
+        elseif saLocked and lockedPlayer then
+            tgt = lockedPlayer
+        end
+        
+        if tgt then
+            local pos, part = getAimPosition(tgt)
+            if part and isFullyVisible(part) then
+                local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                if tool then
+                    tool:Activate()
+                    lastAutoShoot = now
+                end
+            end
+        end
+    end)
 
     -- SA keybind — behaviour depends on mode
     UserInputService.InputBegan:Connect(function(input, gp)
@@ -1111,7 +1365,44 @@ UserInputService.InputBegan:Connect(function(input, processed)
         rapidFireEnabled = not rapidFireEnabled
     end
 
-
+    -- Inventory Sorter
+    if Binds['Inventory Sorter'] and kc == Enum.KeyCode[Binds['Inventory Sorter']:upper()] then
+        local INV_C = CFG['Inventory Helper']
+        if INV_C and INV_C['Enabled'] then
+            local gunOrder = INV_C['Order']
+            local backpack = LocalPlayer:FindFirstChildOfClass('Backpack')
+            if backpack then
+                local fakeFolder = Instance.new('Folder')
+                fakeFolder.Name = 'VanityInventoryTemp'
+                fakeFolder.Parent = workspace
+                
+                -- Move all tools to temp folder
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA('Tool') then
+                        tool.Parent = fakeFolder
+                    end
+                end
+                
+                -- Sort tools based on order
+                for _, weaponName in ipairs(gunOrder) do
+                    local gun = fakeFolder:FindFirstChild(weaponName)
+                    if gun then
+                        gun.Parent = backpack
+                        task.wait(0.05)
+                    end
+                end
+                
+                -- Move remaining tools back
+                for _, tool in pairs(fakeFolder:GetChildren()) do
+                    if tool:IsA('Tool') then
+                        tool.Parent = backpack
+                    end
+                end
+                
+                fakeFolder:Destroy()
+            end
+        end
+    end
 end)
 
 --  CLEANUP FUNCTION
