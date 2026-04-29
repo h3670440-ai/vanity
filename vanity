@@ -1052,6 +1052,12 @@ do
         if not isShutdown and not checkcaller() and method == "FireServer" then
             -- Da Hood standard remotes
             if gameSettings and self.Name == gameSettings.Remote and args[1] == gameSettings.Arg then
+                local aav = CFG['Anti Aim View']
+                if aav and aav['Enabled'] then
+                    args[2] = Mouse.Hit.Position
+                    return oldNamecall(self, unpack(args))
+                end
+
                 local tgt = nil
                 if SA_C['Mode'] == 'Automatic' then
                     tgt = getClosestTarget()
@@ -1127,6 +1133,25 @@ do
     shared._VanityCL_Circle   = CLFovCircle
 
     setreadonly(grm, true)
+
+    -- // ANTI AIM VIEW (SCARCIN BYPASS)
+    local function setupAAV(char)
+        char.ChildAdded:Connect(function(child)
+            local aav = CFG['Anti Aim View']
+            if child:IsA("Tool") and aav and aav['Enabled'] then
+                child.Activated:Connect(function()
+                    if gameSettings and gameSettings.Remote == "MainEvent" then
+                        local mainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+                        if mainEvent then
+                            mainEvent:FireServer("UpdateMousePos", Mouse.Hit.Position)
+                        end
+                    end
+                end)
+            end
+        end)
+    end
+    LocalPlayer.CharacterAdded:Connect(setupAAV)
+    if LocalPlayer.Character then setupAAV(LocalPlayer.Character) end
 
     --  AUTO SHOOT
     local lastAutoShoot = 0
