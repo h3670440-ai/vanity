@@ -500,16 +500,21 @@ TracerOutline.Color = Color3.fromRGB(0, 0, 0)
 TracerOutline.ZIndex = 9
 
 RunService.RenderStepped:Connect(function()
-    if isShutdown or not ESP_C['Tracer'] or not ESP_C['Tracer']['Enabled'] then
+    local TR = ESP_C['Tracer']
+    if isShutdown or not TR or not TR['Enabled'] then
         TracerLine.Visible = false
         TracerOutline.Visible = false
         return
     end
 
+    local mode = TR['Mode'] or {}
+    local showSilent = table.find(mode, "Silent Aim")
+    local showCam    = table.find(mode, "Camera Lock")
+
     local target = nil
-    if camLocked and camTarget then
+    if showCam and camLocked and camTarget then
         target = camTarget
-    elseif currentTarget then
+    elseif showSilent and currentTarget then
         target = currentTarget
     end
 
