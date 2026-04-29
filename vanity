@@ -169,6 +169,19 @@ local function canSeeTarget(part)
     return result == nil or result.Instance:IsDescendantOf(char)
 end
 
+local function isTargetDead(player, feature)
+    local check = Checks['Unlock on Death']
+    if not check or not check['Enabled'] then return false end
+    if not table.find(check['Apply To'], feature) then return false end
+    
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= (check['Health'] or 4) then
+        return true
+    end
+    return false
+end
+
 local function getBodyParts(character)
     return {
         character:FindFirstChild("Head"),
@@ -209,6 +222,7 @@ local function clFindClosest()
         if player == LocalPlayer then continue end
         local char = player.Character
         if not char or clIsKnocked(char) then continue end
+        if isTargetDead(player, "Camera Lock") then continue end
         if isPlayerGrabbed(player) then continue end
         local hum = char:FindFirstChildOfClass('Humanoid')
         if not hum or hum.Health <= 0 then continue end
@@ -753,6 +767,7 @@ do
             if plr == LocalPlayer then continue end
             local char = plr.Character
             if not char or clIsKnocked(char) then continue end
+            if isTargetDead(plr, "Silent Aim") then continue end
             if isPlayerGrabbed(plr) then continue end
             local hum = char:FindFirstChildOfClass('Humanoid')
             if not hum or hum.Health <= 0 then continue end
@@ -866,8 +881,8 @@ do
                     currentTarget = nil
                 end
             else -- 'Target' mode: track the locked player
-                if not saLocked or not lockedPlayer then
-                    currentTarget = nil
+                if not saLocked or not lockedPlayer or isTargetDead(lockedPlayer, "Silent Aim") then
+                    saLocked = false; lockedPlayer = nil; currentTarget = nil
                 else
                     local char = lockedPlayer.Character
                     local hum  = char and char:FindFirstChildOfClass('Humanoid')
@@ -895,7 +910,8 @@ do
 
             if camLocked and camTarget and not isHoldingKnife() then
                 local char = camTarget.Parent
-                if not char or clIsKnocked(char) then
+                local p = char and Players:GetPlayerFromCharacter(char)
+                if not char or clIsKnocked(char) or (p and isTargetDead(p, "Camera Lock")) then
                     camLocked = false; camTarget = nil
                 else
                     local hitPart = CL_C['Hit Part'] or 'HumanoidRootPart'
