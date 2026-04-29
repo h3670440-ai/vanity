@@ -271,6 +271,77 @@ local function clFindClosest()
     return best
 end
 
+-- // VYRON HELPERS
+local isDaHood = game.PlaceId == 2788229376 or game.PlaceId == 16033173781 or game.PlaceId == 7213786345
+
+local function getClosestPoint(part, useCameraDirection)
+    if not part or not part:IsA("BasePart") then return part and part.Position end
+    
+    local cf = part.CFrame
+    local size = part.Size
+    local rayOrigin, rayDirection
+    
+    if useCameraDirection then
+        rayOrigin = Camera.CFrame.Position
+        rayDirection = Camera.CFrame.LookVector
+    else
+        local mousePos = UserInputService:GetMouseLocation()
+        local mouseRay = Camera:ScreenPointToRay(mousePos.X, mousePos.Y)
+        rayOrigin = mouseRay.Origin
+        rayDirection = mouseRay.Direction
+    end
+    
+    if size.Magnitude < 2 then return part.Position end
+    
+    local bestPos = part.Position
+    local closestDist = math.huge
+    local halfSize = size * 0.5
+    
+    for x = -1, 1, 0.4 do -- optimized sample
+        for y = -1, 1, 0.4 do
+            for z = -1, 1, 0.4 do
+                if math.abs(x) > 0.9 or math.abs(y) > 0.9 or math.abs(z) > 0.9 then
+                    local localPos = Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
+                    local worldPos = cf:PointToWorldSpace(localPos)
+                    local pointToRay = worldPos - rayOrigin
+                    local projectionLength = pointToRay:Dot(rayDirection)
+                    local closestPointOnRay = rayOrigin + rayDirection * projectionLength
+                    local distanceToRay = (worldPos - closestPointOnRay).Magnitude
+                    
+                    if distanceToRay < closestDist then
+                        closestDist = distanceToRay
+                        bestPos = worldPos
+                    end
+                end
+            end
+        end
+    end
+    return bestPos
+end
+
+local function getVyronPredictedPosition(part)
+    if not part then return Vector3.new() end
+    if isDaHood then
+        local velocity = part.AssemblyLinearVelocity
+        local prediction = 0.133
+        if SA_C['Auto Prediction'] and SA_C['Auto Prediction']['Enabled'] then
+            local ping = LocalPlayer:GetNetworkPing() * 1000
+            if ping < 50 then prediction = 0.12
+            elseif ping < 100 then prediction = 0.133
+            elseif ping < 150 then prediction = 0.15
+            else prediction = 0.17 end
+        end
+        return part.Position + (velocity * prediction)
+    end
+    local pred = SA_C['Prediction']
+    if not pred then return part.Position end
+    local px, py, pz = pred['X'] or 0, pred['Y'] or 0, pred['Z'] or 0
+    if px == 0 and py == 0 and pz == 0 then return part.Position end
+    local vel   = part.AssemblyLinearVelocity
+    local scale = math.clamp((part.Position - Camera.CFrame.Position).Magnitude / 100, 0.05, 1)
+    return part.Position + Vector3.new(vel.X*px*scale, vel.Y*py*scale, vel.Z*pz*scale)
+end
+
 local FontMap = {
     GothamBold     = Enum.Font.GothamBold,
     Gotham         = Enum.Font.Gotham,
@@ -704,7 +775,8 @@ do
 
             -- Silent Aim
             if SA_C['Enabled'] and currentTarget then
-                lblSA.Visible = true; lblSA.Text = fmt("Silent Aim", tname)
+                local method = SA_C['Method'] or 'Vanity'
+                lblSA.Visible = true; lblSA.Text = fmt("Silent Aim ["..method.."]", tname)
             else lblSA.Visible = false end
 
             -- Cam Lock
@@ -880,7 +952,6 @@ do
         end
     end)
 
-    -- Find closest player within FOV (no checks — targets everyone)
     local function getClosestTarget()
         if isChatFocused() then return nil end
         local fov        = SA_C['Fov']
@@ -922,6 +993,34 @@ do
             end
         end
         return tgt
+    end
+
+    local function vyronFindClosestTarget()
+        if isHoldingKnife() or isChatFocused() then return nil end
+        local best, bd = nil, math.huge
+        local mp       = UserInputService:GetMouseLocation()
+        local fovLimit = (SA_C['Fov']['Enabled'] and (SA_C['Fov']['Value'] or 13) * 12) or math.huge
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local char = player.Character
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 and not clIsKnocked(char) and not isPlayerGrabbed(player) then
+                    local hrp = char:FindFirstChild('HumanoidRootPart')
+                    if hrp then
+                        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                        if onScreen then
+                            local distance = (Vector2.new(screenPos.X, screenPos.Y) - mp).Magnitude
+                            if distance <= fovLimit and distance < bd then
+                                bd = distance
+                                best = hrp
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return best
     end
 
     local DefaultParts = {
@@ -998,16 +1097,20 @@ do
         end
 
         if SA_C['Enabled'] then
+            local saMethod = SA_C['Method'] or 'Vanity'
             if SA_C['Mode'] == 'Automatic' then
-                -- always track whoever is closest in FOV
-                local tgt = getClosestTarget()
-                if tgt then
-                    local _, part = getAimPosition(tgt)
-                    currentTarget = part
+                if saMethod == 'Vyron' then
+                    currentTarget = vyronFindClosestTarget()
                 else
-                    currentTarget = nil
+                    local tgt = getClosestTarget()
+                    if tgt then
+                        local _, part = getAimPosition(tgt)
+                        currentTarget = part
+                    else
+                        currentTarget = nil
+                    end
                 end
-            else -- 'Target' mode: track the locked player
+            else -- 'Target' mode
                 if not saLocked or not lockedPlayer or isTargetDead(lockedPlayer, "Silent Aim") then
                     saLocked = false; lockedPlayer = nil; currentTarget = nil
                 else
@@ -1016,8 +1119,12 @@ do
                     if not char or not hum or hum.Health <= 0 then
                         saLocked = false; lockedPlayer = nil; currentTarget = nil
                     else
-                        local _, part = getAimPosition(lockedPlayer)
-                        currentTarget = part
+                        if saMethod == 'Vyron' then
+                            currentTarget = getClosestBodyPart(char) or char:FindFirstChild("HumanoidRootPart")
+                        else
+                            local _, part = getAimPosition(lockedPlayer)
+                            currentTarget = part
+                        end
                     end
                 end
             end
@@ -1082,9 +1189,27 @@ do
     grm.__namecall = newcclosure(function(self, ...)
         local args   = {...}
         local method = getnamecallmethod()
+        if isShutdown or checkcaller() then return oldNamecall(self, ...) end
 
-        if not isShutdown and not checkcaller() and method == "FireServer" then
-            -- Da Hood standard remotes
+        local saMethod = SA_C['Method'] or 'Vanity'
+
+        if method == "FireServer" and SA_C['Enabled'] then
+            local isLocking = (SA_C['Mode'] == 'Automatic' and currentTarget ~= nil) or (saLocked and lockedPlayer ~= nil)
+            
+            if saMethod == 'Vyron' and isDaHood and isLocking and currentTarget then
+                if tostring(self) == "UpdateMousePosI" or tostring(self):find("UpdateMousePos") then
+                    args[1] = getVyronPredictedPosition(currentTarget)
+                    return oldNamecall(self, unpack(args))
+                end
+                for i, arg in pairs(args) do
+                    if typeof(arg) == "Vector3" then
+                        args[i] = getVyronPredictedPosition(currentTarget)
+                        break
+                    end
+                end
+            end
+
+            -- Vanity / Universal Logic
             if gameSettings and self.Name == gameSettings.Remote and args[1] == gameSettings.Arg then
                 local aav = CFG['Anti Aim View']
                 if aav and aav['Enabled'] then
@@ -1092,15 +1217,15 @@ do
                     return oldNamecall(self, unpack(args))
                 end
 
-                local tgt = nil
-                if SA_C['Mode'] == 'Automatic' then
-                    tgt = getClosestTarget()
-                elseif saLocked and lockedPlayer then
-                    tgt = lockedPlayer
-                end
-
-                if tgt and SA_C['Enabled'] then
-                    local pos = getAimPosition(tgt)
+                if isLocking then
+                    local pos
+                    if saMethod == 'Vyron' then
+                        pos = getVyronPredictedPosition(currentTarget)
+                    else
+                        local tgt = (SA_C['Mode'] == 'Automatic') and getClosestTarget() or lockedPlayer
+                        pos = getAimPosition(tgt)
+                    end
+                    
                     if pos then
                         args[2] = pos
                         return oldNamecall(self, unpack(args))
@@ -1109,45 +1234,57 @@ do
             end
             
             -- Client Redirection
-            if isClientRedirectionWeapon() then
-                local tgt = nil
-                if SA_C['Mode'] == 'Automatic' then
-                    tgt = getClosestTarget()
-                elseif saLocked and lockedPlayer then
-                    tgt = lockedPlayer
+            if isClientRedirectionWeapon() and isLocking then
+                local pos
+                if saMethod == 'Vyron' then
+                    pos = getVyronPredictedPosition(currentTarget)
+                else
+                    local tgt = (SA_C['Mode'] == 'Automatic') and getClosestTarget() or lockedPlayer
+                    pos = getAimPosition(tgt)
                 end
 
-                if tgt and SA_C['Enabled'] then
-                    local pos = getAimPosition(tgt)
-                    if pos then
-                        -- Redirect the shot position argument (usually args[2] or first Vector3)
-                        for i, arg in ipairs(args) do
-                            if typeof(arg) == "Vector3" then
-                                args[i] = pos
-                                break
-                            end
+                if pos then
+                    for i, arg in ipairs(args) do
+                        if typeof(arg) == "Vector3" then
+                            args[i] = pos
+                            break
                         end
-                        return oldNamecall(self, unpack(args))
                     end
+                    return oldNamecall(self, unpack(args))
                 end
+            end
+        end
+
+        -- Vyron Raycast Hook
+        if method == "Raycast" and self == Workspace and SA_C['Enabled'] and saMethod == 'Vyron' then
+            local isLocking = (SA_C['Mode'] == 'Automatic' and currentTarget ~= nil) or (saLocked and lockedPlayer ~= nil)
+            if isLocking and currentTarget then
+                local origin = args[1]
+                local predictedPos = getVyronPredictedPosition(currentTarget)
+                args[2] = (predictedPos - origin).Unit * 1000
             end
         end
 
         return oldNamecall(self, ...)
     end)
 
-    -- Mouse.Hit hook: Visual only, Namecall handles the actual server shot
+    -- Mouse.Hit hook
     grm.__index = newcclosure(function(self, key)
         if not isShutdown and not checkcaller() and self == Mouse and SA_C['Enabled'] then
             if key == 'Hit' or key == 'Target' then
-                local tgt = nil
-                if SA_C['Mode'] == 'Automatic' then
-                    tgt = getClosestTarget()
-                elseif saLocked and lockedPlayer then
-                    tgt = lockedPlayer
-                end
-                if tgt then
-                    local pos, part = getAimPosition(tgt)
+                local saMethod = SA_C['Method'] or 'Vanity'
+                local isLocking = (SA_C['Mode'] == 'Automatic' and currentTarget ~= nil) or (saLocked and lockedPlayer ~= nil)
+                
+                if isLocking then
+                    local pos, part
+                    if saMethod == 'Vyron' then
+                        pos = getVyronPredictedPosition(currentTarget)
+                        part = currentTarget
+                    else
+                        local tgt = (SA_C['Mode'] == 'Automatic') and getClosestTarget() or lockedPlayer
+                        pos, part = getAimPosition(tgt)
+                    end
+                    
                     if pos then
                         if key == 'Target' then return part or oldIndex(self, key) end
                         return CFrame.new(pos)
