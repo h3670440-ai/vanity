@@ -95,6 +95,16 @@ end
 
 
 
+local DefaultParts = {
+    'Head', 'UpperTorso', 'HumanoidRootPart', 'LowerTorso',
+    'LeftHand',     'RightHand',
+    'LeftLowerArm', 'RightLowerArm',
+    'LeftUpperArm', 'RightUpperArm',
+    'LeftFoot',     'RightFoot',
+    'LeftLowerLeg', 'RightLowerLeg',
+    'LeftUpperLeg', 'RightUpperLeg'
+}
+
 local function getBodyParts(character)
     return {
         character:FindFirstChild("Head"),
@@ -109,6 +119,7 @@ local function getBodyParts(character)
         character:FindFirstChild("LeftFoot"),      character:FindFirstChild("RightFoot"),
     }
 end
+
 
 local function getClosestBodyPart(character)
     local best, bd = nil, math.huge
@@ -668,19 +679,6 @@ do
     SilentCircle.Color       = Color3.fromRGB(255, 255, 255)
     SilentCircle.Visible     = false
 
-    -- Target Tracer
-    local TracerOutline = Drawing.new('Line')
-    TracerOutline.Thickness    = 3
-    TracerOutline.Transparency = 1
-    TracerOutline.Color        = Color3.fromRGB(0, 0, 0)
-    TracerOutline.Visible      = false
-
-    local TracerLine = Drawing.new('Line')
-    TracerLine.Thickness    = 1
-    TracerLine.Transparency = 1
-    TracerLine.Color        = Color3.fromRGB(255, 60, 60)
-    TracerLine.Visible      = false
-
     -- Camlock FOV circle
     local CLFovCircle = Drawing.new("Circle")
     CLFovCircle.Filled       = false
@@ -689,12 +687,11 @@ do
     CLFovCircle.Transparency = 1
     CLFovCircle.Visible      = false
 
+
     RunService.RenderStepped:Connect(function()
         if isShutdown then 
             SilentCircle.Visible = false
             CLFovCircle.Visible = false
-            TracerLine.Visible = false
-            TracerOutline.Visible = false
             return 
         end
         
@@ -723,38 +720,8 @@ do
         else
             CLFovCircle.Visible = false
         end
-
-        -- Tracer
-        local tracerCfg = ESP_C['Tracer']
-        local isHiddenByEsp = tracerCfg['Sync with ESP'] and not ESP_C['Enabled']
-
-        if not tracerCfg['Enabled'] or not currentTarget or isHiddenByEsp then
-            TracerLine.Visible = false
-            TracerOutline.Visible = false
-        else
-            local sp, on = Camera:WorldToViewportPoint(currentTarget.Position)
-            if on and sp.Z > 0 then
-                local startPos = UserInputService:GetMouseLocation()
-                local endPos   = Vector2.new(sp.X, sp.Y)
-
-                TracerOutline.From         = startPos
-                TracerOutline.To           = endPos
-                TracerOutline.Thickness    = (tracerCfg['Thickness'] or 1) + 2
-                TracerOutline.Transparency = tracerCfg['Transparency'] or 1
-                TracerOutline.Visible      = true
-
-                TracerLine.From            = startPos
-                TracerLine.To              = endPos
-                TracerLine.Thickness       = tracerCfg['Thickness'] or 1
-                TracerLine.Transparency    = tracerCfg['Transparency'] or 1
-                TracerLine.Color           = tracerCfg['Color'] or Color3.fromRGB(255, 60, 60)
-                TracerLine.Visible         = true
-            else
-                TracerLine.Visible = false
-                TracerOutline.Visible = false
-            end
-        end
     end)
+
 
     -- Find closest player within FOV (no checks — targets everyone)
     local function getClosestTarget()
@@ -811,11 +778,12 @@ do
     -- Get the best body part to aim at on the target
     local function getAimPosition(plr)
         if not plr or not plr.Character then return nil, nil end
-        local char    = plr.Character
-        local parts   = SA_C['Hit Location']['Parts']
-        local mp      = UserInputService:GetMouseLocation()
-        local selMode = SA_C['Selection Mode'] or 'Mouse'
-        local best, bd = nil, math.huge
+        local char      = plr.Character
+        local configParts = SA_C['Hit Location'] and SA_C['Hit Location']['Parts']
+        local parts     = (configParts == nil or configParts == 'All') and DefaultParts or configParts
+        local mp        = UserInputService:GetMouseLocation()
+        local selMode   = SA_C['Selection Mode'] or 'Mouse'
+        local best, bd  = nil, math.huge
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
@@ -840,6 +808,7 @@ do
         local vel       = best.AssemblyLinearVelocity or Vector3.new()
         return best.Position + vel * predVal, best
     end
+
 
 
     -- RenderStepped: update targets
