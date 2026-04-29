@@ -1,7 +1,7 @@
 -- vanitynew.lua | Vanity
 -- https://github.com/h3670440-ai/vanity
 
-assert(shared.VanityNew, "[Vanity] Config not found — run vanityconfig.lua first.")
+assert(shared.VanityNew)
 local CFG = shared.VanityNew
 
 -- Cleanup any previous execution
@@ -31,6 +31,7 @@ local RF_C  = CFG['Rapid Fire']
 local IR_C  = CFG['Infinite Range']
 local SM_C  = CFG['Spread Modifier']
 local CL_C  = CFG['Camera Lock']
+local Checks = CFG['General']['Checks']
 
 --  STATE
 local speedEnabled     = false
@@ -63,6 +64,7 @@ local function isHoldingKnife()
 end
 
 local function clIsKnocked(char)
+    if not Checks['Knocked'] then return false end
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
@@ -77,6 +79,42 @@ local function clIsKnocked(char)
         if k and k.Value then return true end
     end
     return false
+end
+
+local function isPlayerGrabbed(player)
+    if not Checks['Grabbed'] then return false end
+    if not player.Character then return false end
+    return player.Character:FindFirstChild('GRABBING_CONSTRAINT') ~= nil
+end
+
+local function isChatFocused()
+    if not Checks['Chat Focused'] then return false end
+    local chatBar = LocalPlayer:FindFirstChild("PlayerGui")
+    if chatBar then
+        chatBar = chatBar:FindFirstChild("Chat")
+        if chatBar then
+            chatBar = chatBar:FindFirstChild("Frame")
+            if chatBar then
+                chatBar = chatBar:FindFirstChild("ChatBarParentFrame")
+                if chatBar and chatBar.Visible then return true end
+            end
+        end
+    end
+    return false
+end
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType  = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
+
+local function canSeeTarget(part)
+    if not Checks['Visible'] then return true end
+    if not part or not part.Parent then return false end
+    local char = part.Parent
+    rayParams.FilterDescendantsInstances = { LocalPlayer.Character, char }
+    local origin = Camera.CFrame.Position
+    local result = workspace:Raycast(origin, part.Position - origin, rayParams)
+    return result == nil or result.Instance:IsDescendantOf(char)
 end
 
 local function getBodyParts(character)
@@ -110,6 +148,7 @@ local function getClosestBodyPart(character)
 end
 
 local function clFindClosest()
+    if isChatFocused() then return nil end
     local mp       = UserInputService:GetMouseLocation()
     local fovCfg   = CL_C['FOV'] or {}
     local fovLimit = (fovCfg['Enabled'] and fovCfg['Size']) or math.huge
@@ -118,6 +157,7 @@ local function clFindClosest()
         if player == LocalPlayer then continue end
         local char = player.Character
         if not char or clIsKnocked(char) then continue end
+        if isPlayerGrabbed(player) then continue end
         local hum = char:FindFirstChildOfClass('Humanoid')
         if not hum or hum.Health <= 0 then continue end
         local hrp = char:FindFirstChild('HumanoidRootPart')
@@ -485,9 +525,6 @@ do
     local MainEvent = nil
     if gameSettings then
         MainEvent = ReplicatedStorage:FindFirstChild(gameSettings.Remote)
-        if MainEvent then
-            print("[Vanity] Game matched: " .. gameSettings.Remote)
-        end
     end
 
     -- FOV circle
@@ -589,6 +626,7 @@ do
 
     -- Find closest player within FOV (no checks — targets everyone)
     local function getClosestTarget()
+        if isChatFocused() then return nil end
         local fov        = SA_C['Fov']
         local fovEnabled = fov['Enabled']
         local selMode    = SA_C['Selection Mode'] or 'Mouse'
@@ -599,7 +637,8 @@ do
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr == LocalPlayer then continue end
             local char = plr.Character
-            if not char then continue end
+            if not char or clIsKnocked(char) then continue end
+            if isPlayerGrabbed(plr) then continue end
             local hum = char:FindFirstChildOfClass('Humanoid')
             if not hum or hum.Health <= 0 then continue end
             local hrp = char:FindFirstChild('HumanoidRootPart')
@@ -639,7 +678,7 @@ do
 
         for _, pname in ipairs(parts) do
             local part = char:FindFirstChild(pname)
-            if part and part:IsA('BasePart') then
+            if part and part:IsA('BasePart') and canSeeTarget(part) then
                 local sp, on    = Camera:WorldToViewportPoint(part.Position)
                 local isOnScreen = (on and sp.Z > 0)
                 local mouseDist = isOnScreen and (Vector2.new(sp.X, sp.Y) - mp).Magnitude or 50000
@@ -839,7 +878,6 @@ do
         if CL_C['Target Mode'] == 'Automatic' then
             CL_C['Enabled'] = not CL_C['Enabled']
             if not CL_C['Enabled'] then camLocked = false; camTarget = nil end
-            print('[Vanity] Camlock ' .. (CL_C['Enabled'] and 'ON' or 'OFF'))
         else
             if camLocked then
                 camLocked = false; camTarget = nil
@@ -930,7 +968,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
         if hudGui then pcall(function() hudGui:Destroy() end) end
         pcall(function() espGui:Destroy() end)
         shared.VanityCleanup = nil
-        print('[Vanity] Shutdown.')
         return
     end
 
@@ -940,10 +977,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
         if speedEnabled then
             local hum = getHumanoid()
             if hum then hum.WalkSpeed = SPD_C['Value'] or 16 end
-            print('[Vanity] Speed ON → ' .. (SPD_C['Value'] or 16))
         else
             resetSpeed()
-            print('[Vanity] Speed OFF')
         end
     end
 
@@ -953,13 +988,50 @@ UserInputService.InputBegan:Connect(function(input, processed)
         if not ESP_C['Enabled'] then
             for _, lbl in pairs(espLabels) do lbl.Visible = false end
         end
-        print('[Vanity] ESP ' .. (ESP_C['Enabled'] and 'ON' or 'OFF'))
     end
 
     -- Rapid Fire toggle
     if RF_C['Enabled'] and Binds['Rapid Fire'] and kc == Enum.KeyCode[Binds['Rapid Fire']:upper()] then
         rapidFireEnabled = not rapidFireEnabled
-        print('[Vanity] Rapid Fire ' .. (rapidFireEnabled and 'ON' or 'OFF'))
+    end
+
+    -- Inventory Sorter
+    if Binds['Inventory Sorter'] and kc == Enum.KeyCode[Binds['Inventory Sorter']:upper()] then
+        local INV_C = CFG['Inventory Helper']
+        if INV_C and INV_C['Enabled'] then
+            local gunOrder = INV_C['Order']
+            local backpack = LocalPlayer:FindFirstChildOfClass('Backpack')
+            if backpack then
+                local fakeFolder = Instance.new('Folder')
+                fakeFolder.Name = 'VanityInventoryTemp'
+                fakeFolder.Parent = workspace
+                
+                -- Move all tools to temp folder
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA('Tool') then
+                        tool.Parent = fakeFolder
+                    end
+                end
+                
+                -- Sort tools based on order
+                for _, weaponName in ipairs(gunOrder) do
+                    local gun = fakeFolder:FindFirstChild(weaponName)
+                    if gun then
+                        gun.Parent = backpack
+                        task.wait(0.05)
+                    end
+                end
+                
+                -- Move remaining tools back
+                for _, tool in pairs(fakeFolder:GetChildren()) do
+                    if tool:IsA('Tool') then
+                        tool.Parent = backpack
+                    end
+                end
+                
+                fakeFolder:Destroy()
+            end
+        end
     end
 end)
 
@@ -987,14 +1059,4 @@ shared.VanityCleanup = function()
     pcall(function() TracerOutline:Remove() end)
     if hudGui then pcall(function() hudGui:Destroy() end) end
     pcall(function() espGui:Destroy() end)
-    print('[Vanity] Cleaned up.')
 end
-
-print(string.format('[Vanity] Ready. | SA [%s] | Speed [%s] | ESP [%s] | RF [%s] | Camlock [%s] | Shutdown [%s]',
-    Binds['Silent Aim'] or 'Y',
-    Binds['Speed']      or 'X',
-    Binds['ESP']        or 'H',
-    Binds['Rapid Fire'] or 'L',
-    Binds['Camera Lock'] or 'K',
-    Binds['Shutdown']   or 'P'
-))
