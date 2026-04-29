@@ -15,6 +15,7 @@ local Players           = game:GetService("Players")
 local UserInputService  = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting          = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer.Character
@@ -579,6 +580,39 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================================
+--  COLOR CORRECTION
+do
+    local CC_C = CFG['Color Correction']
+    if CC_C then
+        local cc = Lighting:FindFirstChild("VanityColorCorrection") or Instance.new("ColorCorrectionEffect")
+        cc.Name = "VanityColorCorrection"
+        cc.Parent = Lighting
+        
+        local function applyCC()
+            if isShutdown or not CC_C['Enabled'] then
+                cc.Enabled = false
+                return
+            end
+            
+            cc.Enabled = true
+            if CC_C['Saturation']['Enabled'] then
+                cc.Saturation = math.clamp(CC_C['Saturation']['Value'], -1, 1)
+            else
+                cc.Saturation = 0
+            end
+            
+            if CC_C['Contrast']['Enabled'] then
+                cc.Contrast = math.clamp(CC_C['Contrast']['Value'], -1, 1)
+            else
+                cc.Contrast = 0
+            end
+        end
+        
+        applyCC()
+        shared._VanityCC = cc
+    end
+end
+
 --  HUD
 -- ============================================================================
 local hudGui = nil
@@ -1302,6 +1336,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
         pcall(function() TracerOutline:Remove() end)
         if hudGui then pcall(function() hudGui:Destroy() end) end
         pcall(function() espGui:Destroy() end)
+        pcall(function() if shared._VanityCC then shared._VanityCC:Destroy() end end)
         shared.VanityCleanup = nil
         return
     end
@@ -1394,4 +1429,5 @@ shared.VanityCleanup = function()
     pcall(function() TracerOutline:Remove() end)
     if hudGui then pcall(function() hudGui:Destroy() end) end
     pcall(function() espGui:Destroy() end)
+    pcall(function() if shared._VanityCC then shared._VanityCC:Destroy() end end)
 end
