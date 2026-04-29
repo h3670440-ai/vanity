@@ -490,10 +490,19 @@ local TracerLine = Drawing.new("Line")
 TracerLine.Visible = false
 TracerLine.Thickness = 1
 TracerLine.Transparency = 1
+TracerLine.ZIndex = 10
+
+local TracerOutline = Drawing.new("Line")
+TracerOutline.Visible = false
+TracerOutline.Thickness = 3
+TracerOutline.Transparency = 0.5
+TracerOutline.Color = Color3.fromRGB(0, 0, 0)
+TracerOutline.ZIndex = 9
 
 RunService.RenderStepped:Connect(function()
     if isShutdown or not ESP_C['Tracer'] or not ESP_C['Tracer']['Enabled'] then
         TracerLine.Visible = false
+        TracerOutline.Visible = false
         return
     end
 
@@ -508,17 +517,30 @@ RunService.RenderStepped:Connect(function()
         local sp, on = Camera:WorldToViewportPoint(target.Position)
         if on and sp.Z > 0 then
             local mp = UserInputService:GetMouseLocation()
-            TracerLine.From = Vector2.new(mp.X, mp.Y) -- Mouse position
-            TracerLine.To   = Vector2.new(sp.X, sp.Y)
+            local fromPos = Vector2.new(mp.X, mp.Y)
+            local toPos   = Vector2.new(sp.X, sp.Y)
+
+            -- Main Line
+            TracerLine.From = fromPos
+            TracerLine.To   = toPos
             TracerLine.Color = ESP_C['Tracer']['Color'] or Color3.fromRGB(255, 60, 60)
             TracerLine.Thickness = ESP_C['Tracer']['Thickness'] or 1
             TracerLine.Transparency = ESP_C['Tracer']['Transparency'] or 1
             TracerLine.Visible = true
+
+            -- Outline
+            TracerOutline.From = fromPos
+            TracerOutline.To   = toPos
+            TracerOutline.Thickness = TracerLine.Thickness + 2
+            TracerOutline.Transparency = TracerLine.Transparency * 0.5
+            TracerOutline.Visible = true
         else
             TracerLine.Visible = false
+            TracerOutline.Visible = false
         end
     else
         TracerLine.Visible = false
+        TracerOutline.Visible = false
     end
 end)
 
