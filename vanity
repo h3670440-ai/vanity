@@ -754,7 +754,7 @@ do
             if isShutdown then return end
             frame.Position = hudPos
             local tname = getTargetName()
-            local TC = HUD_C['Title Color'] or Color3.fromRGB(0, 170, 255)
+            local TC = HUD_C['Title Color'] or Color3.fromRGB(255, 0, 0)
 
             titleLbl.Visible = true
             titleLbl.Text = string.format('<font color="%s">Vanity</font>', rgb(TC))
