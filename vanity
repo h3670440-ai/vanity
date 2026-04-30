@@ -5,11 +5,14 @@ assert(shared.VanityNew)
 local CFG = shared.VanityNew
 local LocalPlayer = game:GetService("Players").LocalPlayer
 
+local HttpService = game:GetService("HttpService")
+local RbxAnalyticsService = game:GetService("RbxAnalyticsService")
+
 -- // VERIFICATION SYSTEM
 local function verify()
     local key = CFG['General']['Key'] or ""
+    local hwid = RbxAnalyticsService:GetClientId()
     
-    -- IMPORTANT: Replace this with your actual Railway URL after deployment
     local apiUrl = "https://worker-production-31dc.up.railway.app" 
     
     if key == "YOUR_KEY_HERE" or key == "" then
@@ -18,7 +21,7 @@ local function verify()
     end
 
     local success, response = pcall(function()
-        return game:HttpGet(apiUrl .. "/verify?key=" .. key)
+        return game:HttpGet(apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid)
     end)
     
     if not success then
@@ -26,14 +29,17 @@ local function verify()
         return false
     end
     
-    if response == "blacklisted" then
-        LocalPlayer:Kick("blacklisted bucko")
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(response)
+    end)
+    
+    if not ok then
+        LocalPlayer:Kick("server sent invalid response")
         return false
-    elseif response == "not redeemed" then
-        LocalPlayer:Kick("key exists but not redeemed yet")
-        return false
-    elseif response ~= "success" then
-        LocalPlayer:Kick("key mismatch or not found (Server said: " .. tostring(response) .. ")")
+    end
+    
+    if not data.valid then
+        LocalPlayer:Kick(tostring(data.reason))
         return false
     end
     
