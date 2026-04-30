@@ -33,7 +33,7 @@ local function verify()
         LocalPlayer:Kick("key exists but not redeemed yet")
         return false
     elseif response ~= "success" then
-        LocalPlayer:Kick("key mismatch or not found")
+        LocalPlayer:Kick("key mismatch or not found (Server said: " .. tostring(response) .. ")")
         return false
     end
     
