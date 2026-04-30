@@ -34,6 +34,7 @@ local SM_C  = CFG['Spread Modifier']
 local CL_C  = CFG['Camera Lock']
 local TB_C  = CFG['Triggerbot']
 local SJ_C  = CFG['Super Jump']
+local SP_C  = CFG['Spiderman']
 local Checks = CFG['General']['Checks']
 
 --  STATE
@@ -51,6 +52,7 @@ local tbTarget          = nil
 local tbLastShot        = 0
 local triggerbotEnabled = false
 local superJumpEnabled  = false
+local spidermanEnabled  = false
 
 --  HELPERS
 local function getHumanoid()
@@ -299,9 +301,60 @@ RunService.RenderStepped:Connect(function()
     -- Super Jump
     if SJ_C['Enabled'] and superJumpEnabled then
         local hum = getHumanoid()
-        if hum then 
-            hum.JumpPower = SJ_C['Value'] or 50 
-            hum.UseJumpPower = true
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hum and hrp then
+            -- Only jump if on ground
+            if (hum:GetState() == Enum.HumanoidStateType.Landed or hum.FloorMaterial ~= Enum.Material.Air) then
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, SJ_C['Power'] or 200, hrp.Velocity.Z)
+                task.wait(SJ_C['Cooldown'] or 0.1)
+            end
+        end
+    end
+    
+    -- Spiderman
+    if SP_C['Enabled'] and spidermanEnabled then
+        local hum = getHumanoid()
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hum and hrp then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {char}
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            
+            local directions = {
+                hrp.CFrame.LookVector * 3,
+                hrp.CFrame.RightVector * 3,
+                -hrp.CFrame.RightVector * 3,
+            }
+            
+            local foundWall = false
+            for _, dir in pairs(directions) do
+                local result = workspace:Raycast(hrp.Position, dir, rayParams)
+                if result and result.Instance then
+                    foundWall = true; break
+                end
+            end
+            
+            if foundWall then
+                if hum:GetState() ~= Enum.HumanoidStateType.Climbing then
+                    hum:SetStateEnabled(Enum.HumanoidStateType.Climbing, true)
+                    hum:ChangeState(Enum.HumanoidStateType.Climbing)
+                end
+                
+                local bv = hrp:FindFirstChild("VanitySpidermanVelocity") or Instance.new("BodyVelocity")
+                bv.Name = "VanitySpidermanVelocity"
+                bv.MaxForce = Vector3.new(0, 4000, 0)
+                bv.Velocity = Vector3.new(0, 0, 0)
+                bv.Parent = hrp
+            else
+                local bv = hrp:FindFirstChild("VanitySpidermanVelocity")
+                if bv then bv:Destroy() end
+            end
+        end
+    else
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local bv = hrp:FindFirstChild("VanitySpidermanVelocity")
+            if bv then bv:Destroy() end
         end
     end
 end)
@@ -778,6 +831,7 @@ do
             if RF_C['Enabled'] and rapidFireEnabled then table.insert(activeFeatures, "Rapid") end
             if SM_C['Enabled'] then table.insert(activeFeatures, "Spread") end
             if SJ_C['Enabled'] and superJumpEnabled then table.insert(activeFeatures, "Jump") end
+            if SP_C['Enabled'] and spidermanEnabled then table.insert(activeFeatures, "Spider") end
             if IR_C['Enabled'] then table.insert(activeFeatures, "Range") end
             if SPD_C['Enabled'] and speedEnabled then table.insert(activeFeatures, "Speed") end
             if TB_C['Enabled'] and triggerbotEnabled then table.insert(activeFeatures, "Trigger") end
@@ -1170,7 +1224,7 @@ do
         if not isShutdown and not checkcaller() and k == "JumpPower" then
             if t:IsA("Humanoid") then
                 if SJ_C['Enabled'] and superJumpEnabled then
-                    return oldNewIndex(t, k, SJ_C['Value'] or 100)
+                    return oldNewIndex(t, k, SJ_C['Power'] or 100)
                 elseif CFG['No Jump Cooldown']['Enabled'] then
                     return oldNewIndex(t, k, 50)
                 end
@@ -1555,6 +1609,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
         superJumpEnabled = not superJumpEnabled
     end
 
+    -- Spiderman toggle
+    if SP_C['Enabled'] and Binds['Spiderman'] and kc == Enum.KeyCode[Binds['Spiderman']:upper()] then
+        spidermanEnabled = not spidermanEnabled
+    end
+
     -- Inventory Sorter
     if Binds['Inventory Sorter'] and kc == Enum.KeyCode[Binds['Inventory Sorter']:upper()] then
         local INV_C = CFG['Inventory Helper']
@@ -1609,6 +1668,7 @@ shared.VanityCleanup = function()
     tbTarget          = nil
     triggerbotEnabled = false
     superJumpEnabled  = false
+    spidermanEnabled  = false
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanityGRM, false)
