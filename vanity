@@ -819,18 +819,16 @@ do
         RunService.Heartbeat:Connect(function()
             if isShutdown then return end
             frame.Position = hudPos
+            
+            local TC = rgb(HUD_C['Title Color'] or Color3.fromRGB(255, 0, 0))
+            local FC = rgb(HUD_C['Feature Color'] or Color3.fromRGB(255, 255, 255))
+            local AC = rgb(HUD_C['Active Color'] or Color3.fromRGB(255, 50, 50))
             local tname = getTargetName()
-            local TC = HUD_C['Title Color'] or Color3.fromRGB(255, 0, 0)
 
             titleLbl.Visible = true
-            titleLbl.Text = string.format('<font color="%s">Vanity</font>', rgb(TC))
+            titleLbl.Text = string.format('<font color="%s">Vanity</font>', TC)
 
             local activeFeatures = {}
-            if SA_C['Enabled'] and currentTarget then table.insert(activeFeatures, "Silent") end
-            if CL_C['Enabled'] and camLocked then table.insert(activeFeatures, "Camlock") end
-            if RF_C['Enabled'] and rapidFireEnabled then table.insert(activeFeatures, "Rapid") end
-            if SM_C['Enabled'] then table.insert(activeFeatures, "Spread") end
-            if SJ_C['Enabled'] and superJumpEnabled then table.insert(activeFeatures, "Jump") end
             local function addFeat(name, status)
                 if status then
                     table.insert(activeFeatures, string.format('<font color="%s">%s</font> <font color="%s">(%s)</font>', FC, name, AC, status))
@@ -851,9 +849,6 @@ do
             if ESP_C['Enabled'] then addFeat("ESP") end
 
             if #activeFeatures > 0 then
-                titleLbl.Visible = true
-                titleLbl.Text = string.format('<font color="%s">Vanity</font>', TC)
-                
                 featuresLbl.Visible = true
                 featuresLbl.Text = table.concat(activeFeatures, string.format('<font color="%s"> | </font>', TC))
             else
