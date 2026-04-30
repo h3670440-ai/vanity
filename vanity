@@ -701,6 +701,7 @@ do
         -- Dragging Logic
         titleLbl.Active = true
         titleLbl.InputBegan:Connect(function(input)
+            if not HUD_C['Draggable'] then return end
             if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
                 dragging = true
                 dragStart = input.Position
