@@ -659,18 +659,22 @@ do
         pcall(function() hudGui.Parent = game:GetService("CoreGui") end)
         if not hudGui.Parent then hudGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
+        local hudPos   = UDim2.new(1, -10, 0.5, 0)
+        local dragging = false
+        local dragInput, dragStart, startPos
+
         local frame = Instance.new("Frame", hudGui)
         frame.BackgroundTransparency = 1
         frame.AnchorPoint = Vector2.new(1, 0.5)
-        frame.Position = UDim2.new(1, -10, 0.5, 0)
+        frame.Position = hudPos
         frame.Size = UDim2.new(0, 0, 0, 0)
         frame.AutomaticSize = Enum.AutomaticSize.Y
 
         local layout = Instance.new("UIListLayout", frame)
         layout.FillDirection = Enum.FillDirection.Vertical
-        layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
         layout.VerticalAlignment = Enum.VerticalAlignment.Center
-        layout.Padding = UDim.new(0, 4)
+        layout.Padding = UDim.new(0, 0)
         layout.SortOrder = Enum.SortOrder.LayoutOrder
 
         local function makeLabel(size, order)
@@ -678,9 +682,9 @@ do
             lbl.BackgroundTransparency = 1
             lbl.Size = UDim2.new(0, 0, 0, size + 4)
             lbl.AutomaticSize = Enum.AutomaticSize.X
-            lbl.Font = Enum.Font.SourceSansBold
+            lbl.Font = Enum.Font.GothamBold
             lbl.TextSize = size
-            lbl.TextStrokeTransparency = 0.4
+            lbl.TextStrokeTransparency = 0
             lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             lbl.RichText = true
             lbl.Text = ""; lbl.Visible = false
@@ -688,16 +692,40 @@ do
             return lbl
         end
 
-        -- Smaller text sizes as requested (Title: 20, Labels: 11)
-        local titleLbl = makeLabel(20, 0)
-        local lblSA    = makeLabel(11, 1)
-        local lblCL    = makeLabel(11, 2)
-        local lblRF    = makeLabel(11, 3)
-        local lblSM    = makeLabel(11, 4)
-        local lblIR    = makeLabel(11, 5)
-        local lblSPD   = makeLabel(11, 6)
-        local lblTB    = makeLabel(11, 7)
-        local lblESP   = makeLabel(11, 8)
+        -- HUD Elements
+        local titleLbl    = makeLabel(26, 0)
+        titleLbl.Font     = Enum.Font.LuckiestGuy
+        local featuresLbl = makeLabel(14, 1)
+        featuresLbl.Font  = Enum.Font.GothamBold
+
+        -- Dragging Logic
+        titleLbl.Active = true
+        titleLbl.InputBegan:Connect(function(input)
+            if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                dragging = true
+                dragStart = input.Position
+                startPos = frame.Position
+                
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+
+        titleLbl.InputChanged:Connect(function(input)
+            if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                dragInput = input
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input == dragInput then
+                local delta = input.Position - dragStart
+                hudPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end)
 
         local function rgb(c)
             return string.format("rgb(%d,%d,%d)", math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
@@ -723,52 +751,29 @@ do
 
         RunService.Heartbeat:Connect(function()
             if isShutdown then return end
-            frame.Position = UDim2.new(1, -10, 0.5, 0)
+            frame.Position = hudPos
             local tname = getTargetName()
-            local TC = HUD_C['Title Color'] or Color3.fromRGB(180, 180, 180)
+            local TC = HUD_C['Title Color'] or Color3.fromRGB(0, 170, 255)
 
             titleLbl.Visible = true
             titleLbl.Text = string.format('<font color="%s">Vanity</font>', rgb(TC))
 
-            -- Silent Aim
-            if SA_C['Enabled'] and currentTarget then
-                lblSA.Visible = true; lblSA.Text = fmt("Silent Aim", tname)
-            else lblSA.Visible = false end
+            local activeFeatures = {}
+            if SA_C['Enabled'] and currentTarget then table.insert(activeFeatures, "Silent") end
+            if CL_C['Enabled'] and camLocked then table.insert(activeFeatures, "Camlock") end
+            if RF_C['Enabled'] and rapidFireEnabled then table.insert(activeFeatures, "Rapid") end
+            if SM_C['Enabled'] then table.insert(activeFeatures, "Spread") end
+            if IR_C['Enabled'] then table.insert(activeFeatures, "Range") end
+            if SPD_C['Enabled'] and speedEnabled then table.insert(activeFeatures, "Speed") end
+            if TB_C['Enabled'] and triggerbotEnabled then table.insert(activeFeatures, "Trigger") end
+            if ESP_C['Enabled'] then table.insert(activeFeatures, "ESP") end
 
-            -- Cam Lock
-            if CL_C['Enabled'] and camLocked then
-                lblCL.Visible = true; lblCL.Text = fmt("Cam Lock", tname)
-            else lblCL.Visible = false end
-
-            -- Rapid Fire
-            if RF_C['Enabled'] and rapidFireEnabled then
-                lblRF.Visible = true; lblRF.Text = fmt("Rapid Fire", nil)
-            else lblRF.Visible = false end
-
-            -- Spread Mod
-            if SM_C['Enabled'] then
-                lblSM.Visible = true; lblSM.Text = fmt("Spread Mod", nil)
-            else lblSM.Visible = false end
-
-            -- Inf Range
-            if IR_C['Enabled'] then
-                lblIR.Visible = true; lblIR.Text = fmt("Inf Range", nil)
-            else lblIR.Visible = false end
-
-            -- WalkSpeed
-            if SPD_C['Enabled'] and speedEnabled then
-                lblSPD.Visible = true; lblSPD.Text = fmt("WalkSpeed", nil)
-            else lblSPD.Visible = false end
-
-            -- Triggerbot
-            if TB_C['Enabled'] and triggerbotEnabled then
-                lblTB.Visible = true; lblTB.Text = fmt("Triggerbot", nil)
-            else lblTB.Visible = false end
-
-            -- ESP
-            if ESP_C['Enabled'] then
-                lblESP.Visible = true; lblESP.Text = fmt("ESP", nil)
-            else lblESP.Visible = false end
+            if #activeFeatures > 0 then
+                featuresLbl.Visible = true
+                featuresLbl.Text = table.concat(activeFeatures, " | ")
+            else
+                featuresLbl.Visible = false
+            end
         end)
     end
 end
