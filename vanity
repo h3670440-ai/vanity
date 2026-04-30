@@ -33,6 +33,7 @@ local IR_C  = CFG['Infinite Range']
 local SM_C  = CFG['Spread Modifier']
 local CL_C  = CFG['Camera Lock']
 local TB_C  = CFG['Triggerbot']
+local SJ_C  = CFG['Super Jump']
 local Checks = CFG['General']['Checks']
 
 --  STATE
@@ -49,6 +50,7 @@ local tbActive          = false
 local tbTarget          = nil
 local tbLastShot        = 0
 local triggerbotEnabled = false
+local superJumpEnabled  = false
 
 --  HELPERS
 local function getHumanoid()
@@ -284,12 +286,23 @@ local FontMap = {
     RobotoMono     = Enum.Font.RobotoMono,
 }
 
---  WALKSPEED
+--  WALKSPEED & SUPER JUMP
 RunService.RenderStepped:Connect(function()
     if isShutdown then return end
+    
+    -- Walkspeed
     if SPD_C['Enabled'] and speedEnabled then
         local hum = getHumanoid()
         if hum then hum.WalkSpeed = SPD_C['Value'] or 16 end
+    end
+    
+    -- Super Jump
+    if SJ_C['Enabled'] and superJumpEnabled then
+        local hum = getHumanoid()
+        if hum then 
+            hum.JumpPower = SJ_C['Value'] or 50 
+            hum.UseJumpPower = true
+        end
     end
 end)
 
@@ -764,14 +777,23 @@ do
             if CL_C['Enabled'] and camLocked then table.insert(activeFeatures, "Camlock") end
             if RF_C['Enabled'] and rapidFireEnabled then table.insert(activeFeatures, "Rapid") end
             if SM_C['Enabled'] then table.insert(activeFeatures, "Spread") end
+            if SJ_C['Enabled'] and superJumpEnabled then table.insert(activeFeatures, "Jump") end
             if IR_C['Enabled'] then table.insert(activeFeatures, "Range") end
             if SPD_C['Enabled'] and speedEnabled then table.insert(activeFeatures, "Speed") end
             if TB_C['Enabled'] and triggerbotEnabled then table.insert(activeFeatures, "Trigger") end
             if ESP_C['Enabled'] then table.insert(activeFeatures, "ESP") end
 
             if #activeFeatures > 0 then
+                local AC = rgb(HUD_C['Active Color'] or Color3.fromRGB(255, 50, 50))
+                local FC = rgb(HUD_C['Feature Color'] or Color3.fromRGB(255, 255, 255))
+                
+                local coloredFeatures = {}
+                for _, feat in ipairs(activeFeatures) do
+                    table.insert(coloredFeatures, string.format('<font color="%s">%s</font>', AC, feat))
+                end
+                
                 featuresLbl.Visible = true
-                featuresLbl.Text = table.concat(activeFeatures, " | ")
+                featuresLbl.Text = table.concat(coloredFeatures, string.format('<font color="%s"> | </font>', FC))
             else
                 featuresLbl.Visible = false
             end
@@ -1143,11 +1165,15 @@ do
     local oldNamecall = grm.__namecall
     setreadonly(grm, false)
 
-    -- No Jump Cooldown hook
+    -- No Jump Cooldown & Super Jump hook
     grm.__newindex = newcclosure(function(t, k, v)
-        if not isShutdown and not checkcaller() and k == "JumpPower" and CFG['No Jump Cooldown']['Enabled'] then
+        if not isShutdown and not checkcaller() and k == "JumpPower" then
             if t:IsA("Humanoid") then
-                return oldNewIndex(t, k, 50)
+                if SJ_C['Enabled'] and superJumpEnabled then
+                    return oldNewIndex(t, k, SJ_C['Value'] or 100)
+                elseif CFG['No Jump Cooldown']['Enabled'] then
+                    return oldNewIndex(t, k, 50)
+                end
             end
         end
         return oldNewIndex(t, k, v)
@@ -1524,9 +1550,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
         rapidFireEnabled = not rapidFireEnabled
     end
 
-    -- Triggerbot toggle
-    if TB_C['Enabled'] and Binds['Triggerbot'] and kc == Enum.KeyCode[Binds['Triggerbot']:upper()] then
-        triggerbotEnabled = not triggerbotEnabled
+    -- Super Jump toggle
+    if SJ_C['Enabled'] and Binds['Super Jump'] and kc == Enum.KeyCode[Binds['Super Jump']:upper()] then
+        superJumpEnabled = not superJumpEnabled
     end
 
     -- Inventory Sorter
@@ -1582,6 +1608,7 @@ shared.VanityCleanup = function()
     tbActive          = false
     tbTarget          = nil
     triggerbotEnabled = false
+    superJumpEnabled  = false
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanityGRM, false)
