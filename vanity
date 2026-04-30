@@ -3,6 +3,41 @@
 
 assert(shared.VanityNew)
 local CFG = shared.VanityNew
+local LocalPlayer = game:GetService("Players").LocalPlayer
+
+-- // VERIFICATION SYSTEM
+local function verify()
+    local key = CFG['General']['Key'] or ""
+    
+    -- IMPORTANT: Replace this with your actual Railway URL after deployment
+    local apiUrl = "https://your-api.railway.app" 
+    
+    if key == "YOUR_KEY_HERE" or key == "" then
+        LocalPlayer:Kick("key mismatch or not found")
+        return false
+    end
+
+    local success, response = pcall(function()
+        return game:HttpGet(apiUrl .. "/verify?key=" .. key)
+    end)
+    
+    if not success then
+        LocalPlayer:Kick("failed to connect to verification server")
+        return false
+    end
+    
+    if response == "blacklisted" then
+        LocalPlayer:Kick("blacklisted bucko")
+        return false
+    elseif response ~= "success" then
+        LocalPlayer:Kick("key mismatch or not found")
+        return false
+    end
+    
+    return true
+end
+
+if not verify() then return end
 
 -- Cleanup any previous execution
 if shared.VanityCleanup then
