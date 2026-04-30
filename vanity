@@ -1037,10 +1037,14 @@ do
         local vel = best.AssemblyLinearVelocity or Vector3.new()
         local predictedPosition = best.Position + vel * predVal
         
-        -- // SPREAD MODIFICATIONS (OFFSETS)
+        -- // SPREAD MODIFICATIONS (OFFSETS - RELATIVE TO CAMERA)
         local offsets = SM_C['Offsets']
         if offsets and offsets['Enabled'] then
-            predictedPosition = predictedPosition + Vector3.new(offsets['X'] or 0, offsets['Y'] or 0, offsets['Z'] or 0)
+            local camCF = Camera.CFrame
+            local relativeOffset = (camCF.RightVector * (offsets['X'] or 0)) 
+                                 + (camCF.UpVector    * (offsets['Y'] or 0)) 
+                                 + (camCF.LookVector  * (offsets['Z'] or 0))
+            predictedPosition = predictedPosition + relativeOffset
         end
         
         if shouldBlockAntiCurve(best, predictedPosition) then
@@ -1112,6 +1116,16 @@ do
                         local scale   = math.clamp((aimPart.Position - Camera.CFrame.Position).Magnitude / 100, 0.05, 1)
                         local px, py, pz = pred['X'] or 0, pred['Y'] or 0, pred['Z'] or 0
                         local aimPos  = aimPart.Position + Vector3.new(vel.X*px*scale, vel.Y*py*scale, vel.Z*pz*scale)
+                        
+                        -- // SPREAD MODIFICATIONS (OFFSETS - RELATIVE TO CAMERA)
+                        local offsets = SM_C['Offsets']
+                        if offsets and offsets['Enabled'] then
+                            local camCF = Camera.CFrame
+                            local relativeOffset = (camCF.RightVector * (offsets['X'] or 0)) 
+                                                 + (camCF.UpVector    * (offsets['Y'] or 0)) 
+                                                 + (camCF.LookVector  * (offsets['Z'] or 0))
+                            aimPos = aimPos + relativeOffset
+                        end
                         
                         local targetCF = CFrame.new(Camera.CFrame.Position, aimPos)
                         local smooth   = math.clamp(tonumber(CL_C['Smoothness']) or 0, 0, 0.99)
