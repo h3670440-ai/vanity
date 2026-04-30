@@ -45,6 +45,9 @@ local saLocked         = false  -- whether we have a target locked
 local lockedPlayer     = nil   -- the Player object that is locked
 local camLocked         = false
 local camTarget         = nil
+local tbActive          = false
+local tbTarget          = nil
+local tbLastShot        = 0
 local triggerbotEnabled = false
 
 --  HELPERS
@@ -878,6 +881,22 @@ do
             CLFovCircle.Visible = false
         end
 
+        -- Triggerbot FOV circle
+        if TB_C['Enabled'] then
+            local fov = TB_C['FOV'] or {}
+            if fov['Enabled'] and fov['Visible'] then
+                local mp = UserInputService:GetMouseLocation()
+                TBCircle.Position = mp
+                TBCircle.Radius   = (fov['Size'] or 20) * 5
+                TBCircle.Color    = fov['Color'] or Color3.new(1, 1, 1)
+                TBCircle.Visible  = true
+            else
+                TBCircle.Visible = false
+            end
+        else
+            TBCircle.Visible = false
+        end
+
         -- Tracer
         local tracerCfg = ESP_C['Tracer']
         local isHiddenByEsp = tracerCfg['Sync with ESP'] and not ESP_C['Enabled']
@@ -1195,6 +1214,7 @@ do
     shared._VanityGRM         = grm
     shared._VanitySA_Circle   = SilentCircle
     shared._VanityCL_Circle   = CLFovCircle
+    shared._VanityTB_Circle   = TBCircle
 
     setreadonly(grm, true)
 
@@ -1291,50 +1311,85 @@ do
     end)
 end
 
-    -- Triggerbot Logic
-    local lastTriggerShoot = 0
+    --  TRIGGERBOT (Vyron Implementation)
+    local TBCircle = Drawing.new("Circle")
+    TBCircle.Filled = false; TBCircle.Thickness = 1
+    TBCircle.NumSides = 64; TBCircle.Transparency = 1; TBCircle.Visible = false
+
+    local function tbFindTarget()
+        if not TB_C or not TB_C['Enabled'] then return nil end
+        local fov    = TB_C['FOV'] or {}
+        local mp     = UserInputService:GetMouseLocation()
+        local radius = (fov['Size'] or 20) * 5
+        local best, bd = nil, math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == LocalPlayer then continue end
+            local char = p.Character
+            if not char then continue end
+            local hum = char:FindFirstChildOfClass('Humanoid')
+            if not hum or hum.Health <= 0 then continue end
+            if clIsKnocked(char) or isPlayerGrabbed(p) then continue end
+            local hrp = char:FindFirstChild('HumanoidRootPart')
+            if not hrp then continue end
+            local sp, on = Camera:WorldToViewportPoint(hrp.Position)
+            if not on or sp.Z <= 0 then continue end
+            local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
+            if fov['Enabled'] and d > radius then continue end
+            if d < bd then bd = d; best = p end
+        end
+        return best
+    end
+
+    local function tbMouseOnTarget()
+        if not tbTarget then return false end
+        local char = tbTarget.Character; if not char then return false end
+        local hit = Mouse.Target; if not hit then return false end
+        return hit == char or hit:IsDescendantOf(char)
+    end
+
+    -- Tracking Loop
+    RunService.Heartbeat:Connect(function()
+        if isShutdown or not TB_C or not TB_C['Enabled'] or not triggerbotEnabled then 
+            tbTarget = nil; tbActive = false; return 
+        end
+        if TB_C['Target Mode'] == 'Automatic' then
+            if isHoldingKnife() or isChatFocused() then
+                tbTarget = nil; tbActive = false; return
+            end
+            local t = tbFindTarget()
+            if t then tbTarget = t; tbActive = true
+            else tbTarget = nil; tbActive = false end
+        elseif tbActive then
+            if isHoldingKnife() or isChatFocused() then tbTarget = nil; return end
+            local t = tbFindTarget()
+            if t then tbTarget = t
+            else tbTarget = nil end
+        end
+    end)
+
+    -- Fire Loop
     RunService.Heartbeat:Connect(function()
         if isShutdown or not TB_C or not TB_C['Enabled'] or not triggerbotEnabled then return end
+        if not tbActive or not tbTarget then return end
         if isHoldingKnife() or isChatFocused() then return end
-
-        local now = tick()
-        local delay = TB_C['Delay'] or 0.01
-        if now - lastTriggerShoot < delay then return end
-
-        local target = Mouse.Target
-        if target and target.Parent then
-            local char = target.Parent
-            local player = Players:GetPlayerFromCharacter(char)
-            
-            -- If it's a part of a player character
-            if player and player ~= LocalPlayer then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    -- Check if knocked/grabbed
-                    if clIsKnocked(char) or isPlayerGrabbed(player) then return end
-                    
-                    -- Check visibility
-                    if not canSeeTarget(target) then return end
-
-                    -- Weapon Configuration check
-                    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-                    if tool then
-                        local weaponCfg = TB_C['Weapon Configuration']
-                        if weaponCfg and weaponCfg['Enabled'] then
-                            local allowed = false
-                            for _, name in ipairs(weaponCfg['Gun'] or {}) do
-                                if tool.Name == name or tool.Name:lower():find(name:lower(), 1, true) then
-                                    allowed = true; break
-                                end
-                            end
-                            if not allowed then return end
-                        end
-
-                        tool:Activate()
-                        lastTriggerShoot = now
-                    end
-                end
-            end
+        if not LocalPlayer.Character then return end
+        if not tbMouseOnTarget() then return end
+        
+        local tool = LocalPlayer.Character:FindFirstChildWhichIsA('Tool')
+        if not tool then return end
+        
+        local function clean(s) return s:lower():gsub('[%[%]%- ]', '') end
+        local tn = clean(tool.Name)
+        local ok = false
+        for _, w in ipairs(TB_C['Weapons'] or {}) do
+            if tn:find(clean(w), 1, true) then ok = true; break end
+        end
+        if not ok then return end
+        
+        local cd = TB_C['Cooldown'] or 0.01
+        if tick() - tbLastShot >= cd then
+            tool:Activate()
+            tbLastShot = tick()
         end
     end)
 
@@ -1409,6 +1464,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
         end)
         pcall(function() shared._VanitySA_Circle:Remove() end)
         pcall(function() shared._VanityCL_Circle:Remove() end)
+        pcall(function() if shared._VanityTB_Circle then shared._VanityTB_Circle:Remove() end end)
         pcall(function() TracerLine:Remove() end)
         pcall(function() TracerOutline:Remove() end)
         if hudGui then pcall(function() hudGui:Destroy() end) end
@@ -1497,6 +1553,8 @@ shared.VanityCleanup = function()
     lockedPlayer      = nil
     camLocked         = false
     camTarget         = nil
+    tbActive          = false
+    tbTarget          = nil
     triggerbotEnabled = false
     resetSpeed()
     pcall(function()
@@ -1508,6 +1566,7 @@ shared.VanityCleanup = function()
     end)
     pcall(function() shared._VanitySA_Circle:Remove() end)
     pcall(function() shared._VanityCL_Circle:Remove() end)
+    pcall(function() if shared._VanityTB_Circle then shared._VanityTB_Circle:Remove() end end)
     pcall(function() TracerLine:Remove() end)
     pcall(function() TracerOutline:Remove() end)
     if hudGui then pcall(function() hudGui:Destroy() end) end
