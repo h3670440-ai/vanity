@@ -1037,6 +1037,12 @@ do
         local vel = best.AssemblyLinearVelocity or Vector3.new()
         local predictedPosition = best.Position + vel * predVal
         
+        -- // SPREAD MODIFICATIONS (OFFSETS)
+        local offsets = SM_C['Offsets']
+        if offsets and offsets['Enabled'] then
+            predictedPosition = predictedPosition + Vector3.new(offsets['X'] or 0, offsets['Y'] or 0, offsets['Z'] or 0)
+        end
+        
         if shouldBlockAntiCurve(best, predictedPosition) then
             return nil, nil
         end
