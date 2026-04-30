@@ -32,6 +32,7 @@ local RF_C  = CFG['Rapid Fire']
 local IR_C  = CFG['Infinite Range']
 local SM_C  = CFG['Spread Modifier']
 local CL_C  = CFG['Camera Lock']
+local TB_C  = CFG['Triggerbot']
 local Checks = CFG['General']['Checks']
 
 --  STATE
@@ -44,6 +45,7 @@ local saLocked         = false  -- whether we have a target locked
 local lockedPlayer     = nil   -- the Player object that is locked
 local camLocked         = false
 local camTarget         = nil
+local triggerbotEnabled = false
 
 --  HELPERS
 local function getHumanoid()
@@ -691,7 +693,8 @@ do
         local lblSM    = makeLabel(11, 4)
         local lblIR    = makeLabel(11, 5)
         local lblSPD   = makeLabel(11, 6)
-        local lblESP   = makeLabel(11, 7)
+        local lblTB    = makeLabel(11, 7)
+        local lblESP   = makeLabel(11, 8)
 
         local function rgb(c)
             return string.format("rgb(%d,%d,%d)", math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
@@ -753,6 +756,11 @@ do
             if SPD_C['Enabled'] and speedEnabled then
                 lblSPD.Visible = true; lblSPD.Text = fmt("WalkSpeed", nil)
             else lblSPD.Visible = false end
+
+            -- Triggerbot
+            if TB_C['Enabled'] and triggerbotEnabled then
+                lblTB.Visible = true; lblTB.Text = fmt("Triggerbot", nil)
+            else lblTB.Visible = false end
 
             -- ESP
             if ESP_C['Enabled'] then
@@ -1283,6 +1291,53 @@ do
     end)
 end
 
+    -- Triggerbot Logic
+    local lastTriggerShoot = 0
+    RunService.Heartbeat:Connect(function()
+        if isShutdown or not TB_C or not TB_C['Enabled'] or not triggerbotEnabled then return end
+        if isHoldingKnife() or isChatFocused() then return end
+
+        local now = tick()
+        local delay = TB_C['Delay'] or 0.01
+        if now - lastTriggerShoot < delay then return end
+
+        local target = Mouse.Target
+        if target and target.Parent then
+            local char = target.Parent
+            local player = Players:GetPlayerFromCharacter(char)
+            
+            -- If it's a part of a player character
+            if player and player ~= LocalPlayer then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    -- Check if knocked/grabbed
+                    if clIsKnocked(char) or isPlayerGrabbed(player) then return end
+                    
+                    -- Check visibility
+                    if not canSeeTarget(target) then return end
+
+                    -- Weapon Configuration check
+                    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                    if tool then
+                        local weaponCfg = TB_C['Weapon Configuration']
+                        if weaponCfg and weaponCfg['Enabled'] then
+                            local allowed = false
+                            for _, name in ipairs(weaponCfg['Gun'] or {}) do
+                                if tool.Name == name or tool.Name:lower():find(name:lower(), 1, true) then
+                                    allowed = true; break
+                                end
+                            end
+                            if not allowed then return end
+                        end
+
+                        tool:Activate()
+                        lastTriggerShoot = now
+                    end
+                end
+            end
+        end
+    end)
+
 --  RAPID FIRE
 do
     UserInputService.InputBegan:Connect(function(i, gp)
@@ -1387,6 +1442,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
         rapidFireEnabled = not rapidFireEnabled
     end
 
+    -- Triggerbot toggle
+    if TB_C['Enabled'] and Binds['Triggerbot'] and kc == Enum.KeyCode[Binds['Triggerbot']:upper()] then
+        triggerbotEnabled = not triggerbotEnabled
+    end
+
     -- Inventory Sorter
     if Binds['Inventory Sorter'] and kc == Enum.KeyCode[Binds['Inventory Sorter']:upper()] then
         local INV_C = CFG['Inventory Helper']
@@ -1437,6 +1497,7 @@ shared.VanityCleanup = function()
     lockedPlayer      = nil
     camLocked         = false
     camTarget         = nil
+    triggerbotEnabled = false
     resetSpeed()
     pcall(function()
         setreadonly(shared._VanityGRM, false)
