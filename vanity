@@ -107,10 +107,10 @@ end
 
 if not verify() then return end
 
--- Periodic verification check (every 5 minutes)
+-- Periodic verification check (every 5 seconds for instant kicks)
 task.spawn(function()
     while true do
-        task.wait(300) -- 5 minutes
+        task.wait(5) -- 5 seconds
         if not verify() then
             -- If verification fails, player will be kicked by verify() function
             break
