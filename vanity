@@ -16,30 +16,59 @@ local function verify()
     local apiUrl = "https://worker-production-31dc.up.railway.app" 
     
     if key == "YOUR_KEY_HERE" or key == "" then
-        LocalPlayer:Kick("key mismatch or not found")
+        LocalPlayer:Kick("Vanity | Please set your key in vanityconfig.lua")
         return false
     end
 
-    local success, response = pcall(function()
-        return game:HttpGet(apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid)
-    end)
+    local request_func = (http_request or request or (syn and syn.request))
+    local success, response
     
-    if not success then
-        LocalPlayer:Kick("failed to connect to verification server")
-        return false
+    if request_func then
+        success, response = pcall(function()
+            return request_func({
+                Url = apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid,
+                Method = "GET"
+            })
+        end)
+        
+        if not success then
+            LocalPlayer:Kick("Vanity | Failed to connect to server (Request Error)")
+            return false
+        end
+        
+        if response.StatusCode ~= 200 then
+            LocalPlayer:Kick("Vanity | Server Error (" .. tostring(response.StatusCode) .. ")")
+            return false
+        end
+        
+        response = response.Body
+    else
+        success, response = pcall(function()
+            return game:HttpGet(apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid)
+        end)
+        
+        if not success then
+            LocalPlayer:Kick("Vanity | Failed to connect to server (HttpGet Error)")
+            return false
+        end
     end
     
+    if not response or response == "" then
+        LocalPlayer:Kick("Vanity | No server response received")
+        return false
+    end
+
     local ok, data = pcall(function()
         return HttpService:JSONDecode(response)
     end)
     
     if not ok then
-        LocalPlayer:Kick("server sent invalid response")
+        LocalPlayer:Kick("Vanity | Invalid server response (JSON Error)")
         return false
     end
     
     if not data.valid then
-        LocalPlayer:Kick(tostring(data.reason))
+        LocalPlayer:Kick("Vanity | Access Denied: " .. tostring(data.reason or "Unknown"))
         return false
     end
     
