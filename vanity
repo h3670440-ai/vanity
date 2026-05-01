@@ -93,7 +93,12 @@ local function verify()
     end
     
     if not data.valid then
-        LocalPlayer:Kick("Vanity | Access Denied: " .. tostring(data.reason or "Unknown"))
+        -- Check if this is an admin kick
+        if data.kicked then
+            LocalPlayer:Kick("Vanity | " .. tostring(data.reason or "You have been kicked by an administrator"))
+        else
+            LocalPlayer:Kick("Vanity | Access Denied: " .. tostring(data.reason or "Unknown"))
+        end
         return false
     end
     
@@ -101,6 +106,17 @@ local function verify()
 end
 
 if not verify() then return end
+
+-- Periodic verification check (every 5 minutes)
+task.spawn(function()
+    while true do
+        task.wait(300) -- 5 minutes
+        if not verify() then
+            -- If verification fails, player will be kicked by verify() function
+            break
+        end
+    end
+end)
 
 -- Cleanup any previous execution
 if shared.VanityCleanup then
