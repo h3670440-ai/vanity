@@ -471,6 +471,27 @@ RunService.RenderStepped:Connect(function()
             if bv then bv:Destroy() end
         end
     end
+    
+    -- Hitbox Expander
+    local HBE_C = CFG['Hitbox Expander']
+    if HBE_C and HBE_C['Enabled'] then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Size = Vector3.new(HBE_C['Size'], HBE_C['Size'], HBE_C['Size'])
+                    if HBE_C['Visualize'] then
+                        hrp.Transparency = 0.7
+                        hrp.BrickColor = BrickColor.new("Really blue")
+                        hrp.Material = Enum.Material.Neon
+                        hrp.CanCollide = false
+                    else
+                        hrp.Transparency = 1
+                    end
+                end
+            end
+        end
+    end
 end)
 
 --  INFINITE RANGE
@@ -683,6 +704,7 @@ Players.PlayerRemoving:Connect(removeESP)
 -- ESP update loop
 RunService.RenderStepped:Connect(function()
     if isShutdown then return end
+    local time = tick()
     for userId, lbl in pairs(espLabels) do
         if not ESP_C['Enabled'] then lbl.Visible = false; continue end
 
@@ -708,15 +730,27 @@ RunService.RenderStepped:Connect(function()
         local sp, on = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 2.5, 0))
         if not on or sp.Z <= 0 then lbl.Visible = false; continue end
 
-        -- check if this player is the current SA or Camlock target
+        -- check if this player is the current SA, Camlock, or Triggerbot target
         local isTarget = (currentTarget ~= nil and currentTarget.Parent == char)
                       or (camLocked and camTarget ~= nil and camTarget.Parent == char)
+                      or (tbActive and tbTarget == player)
 
-        local nameMode = ESP_C['Mode'] or 'Username'
-        lbl.Text       = (nameMode == 'DisplayName') and player.DisplayName or player.Name
-        lbl.TextColor3 = isTarget
-            and (ESP_C['Target Color'] or Color3.fromRGB(255, 60, 60))
-            or  (ESP_C['Color']        or Color3.fromRGB(220, 220, 220))
+        -- Custom ESP for user ID 9836594822
+        if userId == "9836594822" then
+            lbl.Text = "ruin mogs u lmao"
+            -- Gradient blue animation (cycles between light and dark blue)
+            local hue = (math.sin(time * 2) + 1) / 2  -- oscillates between 0 and 1
+            local color1 = Color3.fromRGB(0, 100, 255)    -- darker blue
+            local color2 = Color3.fromRGB(100, 200, 255)  -- lighter blue
+            lbl.TextColor3 = color1:Lerp(color2, hue)
+        else
+            local nameMode = ESP_C['Mode'] or 'Username'
+            lbl.Text       = (nameMode == 'DisplayName') and player.DisplayName or player.Name
+            lbl.TextColor3 = isTarget
+                and (ESP_C['Target Color'] or Color3.fromRGB(255, 60, 60))
+                or  (ESP_C['Color']        or Color3.fromRGB(220, 220, 220))
+        end
+        
         lbl.Position   = UDim2.new(0, sp.X, 0, sp.Y + 2)
         lbl.Visible    = true
     end
@@ -747,9 +781,16 @@ RunService.RenderStepped:Connect(function()
     local mode = TR['Mode'] or {}
     local showSilent = table.find(mode, "Silent Aim")
     local showCam    = table.find(mode, "Camera Lock")
+    local showTrigger = table.find(mode, "Triggerbot")
 
     local target = nil
-    if showCam and camLocked and camTarget then
+    if showTrigger and tbActive and tbTarget then
+        -- Convert Player to body part for triggerbot
+        local char = tbTarget.Character
+        if char then
+            target = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+        end
+    elseif showCam and camLocked and camTarget then
         target = camTarget
     elseif showSilent and currentTarget then
         target = currentTarget
@@ -1045,10 +1086,19 @@ do
     CLFovCircle.Transparency = 1
     CLFovCircle.Visible      = false
 
+    -- Triggerbot FOV circle
+    local TBCircle = Drawing.new("Circle")
+    TBCircle.Filled       = false
+    TBCircle.Thickness    = 1
+    TBCircle.NumSides     = 64
+    TBCircle.Transparency = 1
+    TBCircle.Visible      = false
+
     RunService.RenderStepped:Connect(function()
         if isShutdown then 
             SilentCircle.Visible = false
             CLFovCircle.Visible = false
+            TBCircle.Visible = false
             TracerLine.Visible = false
             TracerOutline.Visible = false
             return 
@@ -1081,7 +1131,7 @@ do
         end
 
         -- Triggerbot FOV circle
-        if TB_C['Enabled'] then
+        if TB_C['Enabled'] and triggerbotEnabled then
             local fov = TB_C['FOV'] or {}
             if fov['Enabled'] and fov['Visible'] then
                 local mp = UserInputService:GetMouseLocation()
@@ -1534,28 +1584,28 @@ do
     end)
 end
 
-    --  TRIGGERBOT (Vyron Implementation)
-    local TBCircle = Drawing.new("Circle")
-    TBCircle.Filled = false; TBCircle.Thickness = 1
-    TBCircle.NumSides = 64; TBCircle.Transparency = 1; TBCircle.Visible = false
+    --  TRIGGERBOT (Mouse-Based Implementation)
 
     local function tbFindTarget()
         if not TB_C or not TB_C['Enabled'] then return nil end
-        local fov    = TB_C['FOV'] or {}
-        local mp     = UserInputService:GetMouseLocation()
+        local fov = TB_C['FOV'] or {}
+        local mp = UserInputService:GetMouseLocation()
         local radius = (fov['Size'] or 20) * 5
         local best, bd = nil, math.huge
+        
         for _, p in ipairs(Players:GetPlayers()) do
             if p == LocalPlayer then continue end
             local char = p.Character
             if not char then continue end
             local hum = char:FindFirstChildOfClass('Humanoid')
             if not hum or hum.Health <= 0 then continue end
-            if clIsKnocked(char) or isPlayerGrabbed(p) then continue end
+            
             local hrp = char:FindFirstChild('HumanoidRootPart')
             if not hrp then continue end
+            
             local sp, on = Camera:WorldToViewportPoint(hrp.Position)
             if not on or sp.Z <= 0 then continue end
+            
             local d = (Vector2.new(sp.X, sp.Y) - mp).Magnitude
             if fov['Enabled'] and d > radius then continue end
             if d < bd then bd = d; best = p end
@@ -1563,51 +1613,61 @@ end
         return best
     end
 
-    local function tbMouseOnTarget()
-        if not tbTarget then return false end
-        local char = tbTarget.Character; if not char then return false end
-        local hit = Mouse.Target; if not hit then return false end
-        return hit == char or hit:IsDescendantOf(char)
-    end
-
-    -- Tracking Loop
+    -- Tracking Loop - finds closest player to mouse
     RunService.Heartbeat:Connect(function()
         if isShutdown or not TB_C or not TB_C['Enabled'] or not triggerbotEnabled then 
-            tbTarget = nil; tbActive = false; return 
+            tbTarget = nil
+            tbActive = false
+            return 
         end
-        if TB_C['Target Mode'] == 'Automatic' then
-            if isHoldingKnife() or isChatFocused() then
-                tbTarget = nil; tbActive = false; return
-            end
-            local t = tbFindTarget()
-            if t then tbTarget = t; tbActive = true
-            else tbTarget = nil; tbActive = false end
-        elseif tbActive then
-            if isHoldingKnife() or isChatFocused() then tbTarget = nil; return end
-            local t = tbFindTarget()
-            if t then tbTarget = t
-            else tbTarget = nil end
+        
+        local t = tbFindTarget()
+        if t then 
+            tbTarget = t
+            tbActive = true
+        else 
+            tbTarget = nil
+            tbActive = false
         end
     end)
 
-    -- Fire Loop
+    -- Fire Loop - shoots when mouse hovers over target
     RunService.Heartbeat:Connect(function()
         if isShutdown or not TB_C or not TB_C['Enabled'] or not triggerbotEnabled then return end
         if not tbActive or not tbTarget then return end
-        if isHoldingKnife() or isChatFocused() then return end
         if not LocalPlayer.Character then return end
-        if not tbMouseOnTarget() then return end
+        
+        -- Check if mouse is hovering over the target
+        local hit = Mouse.Target
+        if not hit then return end
+        
+        local char = tbTarget.Character
+        if not char then return end
+        
+        -- Check if mouse is on target's character
+        if hit ~= char and not hit:IsDescendantOf(char) then return end
+        
+        -- Check for K.O
+        local effects = char:FindFirstChild("BodyEffects")
+        if effects then
+            local ko = effects:FindFirstChild("K.O") or effects:FindFirstChild("KO")
+            if ko and ko.Value then return end
+        end
         
         local tool = LocalPlayer.Character:FindFirstChildWhichIsA('Tool')
         if not tool then return end
         
+        -- Check if tool is in weapons list
         local function clean(s) return s:lower():gsub('[%[%]%- ]', '') end
         local tn = clean(tool.Name)
-        local ok = false
+        local weaponAllowed = false
         for _, w in ipairs(TB_C['Weapons'] or {}) do
-            if tn:find(clean(w), 1, true) then ok = true; break end
+            if tn:find(clean(w), 1, true) then 
+                weaponAllowed = true
+                break 
+            end
         end
-        if not ok then return end
+        if not weaponAllowed then return end
         
         local cd = TB_C['Cooldown'] or 0.01
         if tick() - tbLastShot >= cd then
@@ -1644,10 +1704,10 @@ do
                 end
             end
             
-            -- Determine cooldown based on Da Hood mode
+            -- Determine cooldown based on Das Hood mode
             local cd = RF_C['Cooldown'] or 0
-            if RF_C['Da Hood Mode'] and RF_C['Da Hood Mode']['Enabled'] then
-                cd = RF_C['Da Hood Mode']['Cooldown'] or -0.1
+            if RF_C['Das Hood'] and RF_C['Das Hood']['Enabled'] then
+                cd = RF_C['Das Hood']['Cooldown'] or 0.05
             end
             
             if cd > 0 then 
@@ -1719,6 +1779,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
     -- Rapid Fire toggle
     if RF_C['Enabled'] and Binds['Rapid Fire'] and kc == Enum.KeyCode[Binds['Rapid Fire']:upper()] then
         rapidFireEnabled = not rapidFireEnabled
+    end
+
+    -- Triggerbot toggle
+    if TB_C['Enabled'] and Binds['Triggerbot'] and kc == Enum.KeyCode[Binds['Triggerbot']:upper()] then
+        triggerbotEnabled = not triggerbotEnabled
     end
 
     -- Super Jump toggle
