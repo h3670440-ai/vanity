@@ -23,33 +23,58 @@ local function verify()
     local request_func = (http_request or request or (syn and syn.request))
     local success, response
     
-    if request_func then
-        success, response = pcall(function()
-            return request_func({
-                Url = apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid,
-                Method = "GET"
-            })
-        end)
-        
-        if not success then
-            LocalPlayer:Kick("Vanity | Failed to connect to server (Request Error)")
-            return false
-        end
-        
-        if response.StatusCode ~= 200 then
-            LocalPlayer:Kick("Vanity | Server Error (" .. tostring(response.StatusCode) .. ")")
-            return false
-        end
-        
-        response = response.Body
-    else
-        success, response = pcall(function()
-            return game:HttpGet(apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid)
-        end)
-        
-        if not success then
-            LocalPlayer:Kick("Vanity | Failed to connect to server (HttpGet Error)")
-            return false
+    -- Try up to 3 times in case of server errors
+    local maxRetries = 3
+    local retryDelay = 2
+    
+    for attempt = 1, maxRetries do
+        if request_func then
+            success, response = pcall(function()
+                return request_func({
+                    Url = apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid,
+                    Method = "GET"
+                })
+            end)
+            
+            if not success then
+                if attempt < maxRetries then
+                    warn("Vanity | Connection attempt " .. attempt .. " failed, retrying...")
+                    task.wait(retryDelay)
+                else
+                    LocalPlayer:Kick("Vanity | Failed to connect to server after " .. maxRetries .. " attempts")
+                    return false
+                end
+            elseif response.StatusCode == 502 or response.StatusCode == 503 then
+                if attempt < maxRetries then
+                    warn("Vanity | Server temporarily unavailable (attempt " .. attempt .. "), retrying...")
+                    task.wait(retryDelay)
+                else
+                    LocalPlayer:Kick("Vanity | Server unavailable. Please try again later")
+                    return false
+                end
+            elseif response.StatusCode ~= 200 then
+                LocalPlayer:Kick("Vanity | Server Error (" .. tostring(response.StatusCode) .. ")")
+                return false
+            else
+                response = response.Body
+                break
+            end
+        else
+            success, response = pcall(function()
+                return game:HttpGet(apiUrl .. "/check?key=" .. key .. "&hwid=" .. hwid)
+            end)
+            
+            if not success then
+                if attempt < maxRetries then
+                    warn("Vanity | Connection attempt " .. attempt .. " failed, retrying...")
+                    task.wait(retryDelay)
+                else
+                    LocalPlayer:Kick("Vanity | Failed to connect to server after " .. maxRetries .. " attempts")
+                    return false
+                end
+            else
+                break
+            end
         end
     end
     
